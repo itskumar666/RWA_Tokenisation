@@ -10,7 +10,6 @@ contract RWA_Coins is Ownable,ERC20Burnable{
     error RWT_Coins__BalanceMustBeGreaterThanBurnAmount();
 
 constructor()ERC20("RWACoin","RWAC")Ownable(msg.sender){
-
 }
 function mint(address _to,uint256 _amount)external onlyOwner returns (bool){
     if(_amount<=0){
@@ -34,6 +33,4 @@ function burn(uint256 _amount) public override  onlyOwner{
     super.burn(_amount);
 
 }
-    
-
 }

@@ -178,7 +178,14 @@ contract RWA_Manager is Ownable, ReentrancyGuard, IERC721Receiver {
         }
     }
     /*
-
+    @param _requestId The request ID of the asset to be updated.
+    @param _tokenId The ID of the NFT to be updated.
+    @param _imageUri The new image URI of the asset.
+    @notice This function allows a user to update the image URI of an asset.
+    It checks if the asset is verified and if the user is the owner of the asset.
+    If the asset is not verified or the user is not the owner, it reverts the transaction.
+    If the asset is verified and the user is the owner, it updates the image URI
+    in the NFT contract.
     */
     function updateAssetImageUri(
         uint256 _requestId,
@@ -226,6 +233,9 @@ contract RWA_Manager is Ownable, ReentrancyGuard, IERC721Receiver {
 
     function _mintCoins(address _to, uint256 valueInUSD_) private {
         bool mintedCoins = i_rwaC.mint(_to, valueInUSD_);
+        if (!mintedCoins) {
+            revert RWA_NFT__NFTMIntingFailed();
+        }
     }
     function _burnNFT(uint256 tokenId) private {
         i_rwaN.safeTransferFrom(msg.sender, address(this), tokenId);
