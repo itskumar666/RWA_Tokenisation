@@ -45,6 +45,7 @@ contract StakingCoin is ReentrancyGuard, Ownable, Pausable {
     error StakingCoin__TokenNotAllowed();
     error StakingCoin__InsufficientBalance();
     error StakingCoin__InsufficientRewardBalance();
+    error StakingCoin__UnderLockPeriod();
 
     struct stakeInfo {
         uint256 rewardDebt;
@@ -145,26 +146,59 @@ contract StakingCoin is ReentrancyGuard, Ownable, Pausable {
         if (_amount > stakes[msg.sender].amount) {
             revert StakingCoin__InsufficientBalance();
         }
+        bool fine = _stalePeriod();
+
+        if (fine) {
+            uint256 finedAmount;
+            uint256 temp = _amount / 100; // 1% fine
+            if (temp < 10) {
+                finedAmount = 10;
+            } else {
+                finedAmount = temp;
+            }
+
+            uint256 totalDeduction = _amount + finedAmount;
+
+            if (stakes[msg.sender].amount < totalDeduction) {
+                revert StakingCoin__InsufficientBalance();
+            }
+
+            stakes[msg.sender].amount -= totalDeduction;
+
+            rwaCoin.safeTransfer(msg.sender, _amount);
+        }
+
+        rwaCoin.safeTransfer(msg.sender, _amount);
+
         emit CoinWithdrawen(msg.sender, _amount);
-        _updateReward();
+       
         stakes[msg.sender].amount = stakes[msg.sender].amount - _amount;
 
         totalCoinStakedInContract -= _amount;
+         _updateReward();
     }
 
     function claimPartialReward(
         uint256 _amount
     ) external nonReentrant whenNotPaused {
+       
+        _updateReward();
         _claimReward(_amount);
         emit RewardClaimed(msg.sender, _amount);
     }
+
     function claimFullReward() external nonReentrant whenNotPaused {
+       
         uint256 amount = stakes[msg.sender].rewardDebt;
+        _updateReward();
         _claimReward(amount);
         emit RewardClaimed(msg.sender, amount);
     }
 
-    //It takes last rewardDebt and add
+    //////////////////////////////////
+    // Internal & Private Functions //
+    //////////////////////////////////
+
     function _updateReward() private {
         if (stakes[msg.sender].lastUpdated == 0) {
             stakes[msg.sender].lastUpdated = block.timestamp;
@@ -178,6 +212,7 @@ contract StakingCoin is ReentrancyGuard, Ownable, Pausable {
         stakes[msg.sender].rewardDebt += reward;
     }
     function _claimReward(uint256 _amount) private {
+         _stalePeriodError();
         if (stakes[msg.sender].rewardDebt == 0) {
             return; // No reward to claim
         }
@@ -186,7 +221,26 @@ contract StakingCoin is ReentrancyGuard, Ownable, Pausable {
         }
         rwaCoin.safeTransfer(msg.sender, _amount);
         stakes[msg.sender].rewardDebt = stakes[msg.sender].rewardDebt - _amount;
+        stakes[msg.sender].lastUpdated = block.timestamp;
         totalCoinStakedInContract -= _amount;
+    }
+    function _stalePeriod() private view returns (bool) {
+        uint256 lastStakeTimeStamp = block.timestamp -
+            stakes[msg.sender].lastUpdated;
+
+        if (lastStakeTimeStamp < lockPeriod) {
+            return true;
+        } else {
+            return false;
+        }
+    }
+    function _stalePeriodError() private view  {
+        uint256 lastStakeTimeStamp = block.timestamp -
+            stakes[msg.sender].lastUpdated;
+
+        if (lastStakeTimeStamp < lockPeriod) {
+            revert StakingCoin__UnderLockPeriod();
+        } 
     }
     ///////////////////////////////
     ///  External View Functions //
@@ -211,9 +265,18 @@ contract StakingCoin is ReentrancyGuard, Ownable, Pausable {
         return totalCoinStakedInContract;
     }
     function getCurrentAPY() external view returns (uint256) {
-    uint256 secondsInYear = 31536000;
-    uint256 apy = (rewardRate * secondsInYear * 100) / 1e18;
-    return apy; // returns APY as a % with 0 decimals
-}
-
+        uint256 secondsInYear = 31536000;
+        uint256 apy = (rewardRate * secondsInYear * 100) / 1e18;
+        return apy; // returns APY as a % with 0 decimals
+    }
+    function getIfIWillBeFined() external view returns(bool){
+         uint256 lastStakeTimeStamp = block.timestamp -
+            stakes[msg.sender].lastUpdated;
+            if(lastStakeTimeStamp<lockPeriod){
+                return true;
+            }
+            else{
+                return false;
+            }
+    }
 }
