@@ -202,6 +202,26 @@ contract RWA_Manager is Ownable, ReentrancyGuard, IERC721Receiver {
         i_rwaN.setImageUri(_tokenId, _imageUri);
     }
 
+    function mintCoinAgainstEth(
+        address _to
+        
+    ) external payable nonReentrant {
+        if (msg.value <= 0) {
+            revert RWA_Manager__AssetValueNotPositive();
+        }
+       
+        // Assuming 1 ETH = 1000 USD for simplicity, adjust as needed
+        // update it according to coin value in usd 
+        uint256 coinsToMint = (msg.value /1e18) ;
+        _mintCoins(_to, coinsToMint);
+    }
+    function withdraw(address payable _to, uint256 amount) external onlyOwner {
+    require(address(this).balance >= amount, "Insufficient balance");
+    (bool success, ) = _to.call{value: amount}("");
+    require(success, "Transfer failed");
+   }
+
+
     //////////////////////////////
     /// Private Functions   //////////
     //////////////////////////////
@@ -254,4 +274,8 @@ contract RWA_Manager is Ownable, ReentrancyGuard, IERC721Receiver {
         );
         i_rwaC.burn(amount);
     }
+    function getContractEthBalance() external view returns (uint256) {
+    return address(this).balance;
+}
+
 }

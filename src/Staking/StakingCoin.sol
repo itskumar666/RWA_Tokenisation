@@ -57,7 +57,9 @@ contract StakingCoin is ReentrancyGuard, Ownable, Pausable {
     address private RWA_CoinsAddress;
     uint256 private rewardRate;
     uint256 private totalCoinStakedInContract;
-    uint256 private lockPeriod;
+    // user should not withdraw coin before lock period else he will be fined
+    uint256 private lockPeriod; 
+    uint256 private minFine;
 
     // Storing stake info against user address
     mapping(address => stakeInfo) private stakes;
@@ -93,13 +95,15 @@ contract StakingCoin is ReentrancyGuard, Ownable, Pausable {
         address _rwaCoinToken,
         uint256 _totalCoinStakedInContract,
         uint256 _rewardReward,
-        uint256 _lockPeriod
+        uint256 _lockPeriod,
+        uint256 _minFine
     ) Ownable(msg.sender) {
         RWA_CoinsAddress = _rwaCoinToken;
         rwaCoin = IERC20(_rwaCoinToken);
         totalCoinStakedInContract = _totalCoinStakedInContract;
         rewardRate = _rewardReward;
         lockPeriod = _lockPeriod;
+        minFine=_minFine;
     }
     function setRewardRate(uint256 newRate) external onlyOwner {
         rewardRate = newRate;
@@ -115,6 +119,9 @@ contract StakingCoin is ReentrancyGuard, Ownable, Pausable {
 
     function unpause() external onlyOwner {
         _unpause();
+    }
+    function setMinFine(uint256 _minFine) external onlyOwner{
+           minFine=_minFine;
     }
 
     /*
@@ -147,34 +154,32 @@ contract StakingCoin is ReentrancyGuard, Ownable, Pausable {
             revert StakingCoin__InsufficientBalance();
         }
         bool fine = _stalePeriod();
+         uint256 totalDeduction=_amount;
 
         if (fine) {
             uint256 finedAmount;
             uint256 temp = _amount / 100; // 1% fine
-            if (temp < 10) {
-                finedAmount = 10;
+            if (temp < minFine) {
+                finedAmount = minFine;
             } else {
                 finedAmount = temp;
             }
 
-            uint256 totalDeduction = _amount + finedAmount;
+            totalDeduction = _amount + finedAmount;
 
             if (stakes[msg.sender].amount < totalDeduction) {
                 revert StakingCoin__InsufficientBalance();
             }
 
-            stakes[msg.sender].amount -= totalDeduction;
-
-            rwaCoin.safeTransfer(msg.sender, _amount);
         }
 
         rwaCoin.safeTransfer(msg.sender, _amount);
 
         emit CoinWithdrawen(msg.sender, _amount);
        
-        stakes[msg.sender].amount = stakes[msg.sender].amount - _amount;
+        stakes[msg.sender].amount = stakes[msg.sender].amount - totalDeduction;
 
-        totalCoinStakedInContract -= _amount;
+        totalCoinStakedInContract -= totalDeduction;
          _updateReward();
     }
 
@@ -263,6 +268,9 @@ contract StakingCoin is ReentrancyGuard, Ownable, Pausable {
     }
     function gettotalCoinStakedInContract() external view returns (uint256) {
         return totalCoinStakedInContract;
+    }
+    function getMinFine() external view returns(uint256){
+        return minFine;
     }
     function getCurrentAPY() external view returns (uint256) {
         uint256 secondsInYear = 31536000;
