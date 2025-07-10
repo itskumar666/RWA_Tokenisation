@@ -20,6 +20,15 @@
 // view & pure functions
 
 // SPDX-License-Identifier: MIT
+/* 
+@title NFTVault
+@author Ashutosh Kumar
+@notice This contract is used to manage NFTs (ERC-721) as collateral for lending. It allows the owner (LendingManager) to deposit NFTs, return them to borrowers when full coins are returned which were borrowed against nft, and also transfer them to auction houses in case of liquidation.
+@dev The contract is pausable and can be paused by the owner.
+@dev The contract uses OpenZeppelin's Pausable, Ownable, and ReentrancyGuard for security and access control.
+@dev The contract assumes that the NFT contract implements the ERC721 standard and that the LendingManager contract handles the actual transfer of NFTs to this contract.
+*/
+
 pragma solidity ^0.8.20;
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
@@ -43,13 +52,6 @@ import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
         i_rwaNFT = IERC721(rwaNFT);
 
     }  
-    
-    
-    
-    
-    
-    
-    
     
     
     function depositNFT(uint256 tokenId,address _borrower) external nonReentrant whenNotPaused onlyOwner{

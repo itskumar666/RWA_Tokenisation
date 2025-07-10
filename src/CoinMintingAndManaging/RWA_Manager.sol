@@ -40,6 +40,7 @@ contract RWA_Manager is Ownable, ReentrancyGuard, IERC721Receiver {
     error RWA_Manager__BalanceMustBeGreaterThanBurnAmount();
     error RWA_Manager__NotOwnerOfAsset();
     error RWA_NFT__NFTMIntingFailed();
+    error RWA_Manager__NFTValueIsMoreThanSubmittedToken();
 
     RWA_Verification private immutable i_rwaV;
     RWA_NFT private immutable i_rwaN;
@@ -50,6 +51,8 @@ contract RWA_Manager is Ownable, ReentrancyGuard, IERC721Receiver {
     //storing user information for every asset using user address and requestId
     mapping(address => mapping(uint256 => RWA_Types.RWA_Info))
         public s_userAssets;
+
+    event TokenTradable(uint256 indexed tokenId);
 
     constructor(
         address _rwaV,
@@ -99,6 +102,7 @@ contract RWA_Manager is Ownable, ReentrancyGuard, IERC721Receiver {
             revert RWA_Manager__AssetValueNotPositive();
         }
         _mintNFT(_to, tokenURI, assetType_, assetName_, assetId_, valueInUSD_);
+        
         _mintCoins(_to, valueInUSD_);
         s_userAssets[_to][_requestId] = RWA_Types.RWA_Info({
             assetType: assetType_,
@@ -108,9 +112,27 @@ contract RWA_Manager is Ownable, ReentrancyGuard, IERC721Receiver {
             isVerified: isVerified,
             valueInUSD: valueInUSD_,
             owner: msg.sender,
-            tradable: true // Assuming the asset is tradable if this function is called
+            tradable: false // Because they already have minted coin and cant get extra coin from lendingVault
         });
     }
+
+    // submit all coins minted against this token to make token tradable on lending platform
+
+        function changeNftTradable( uint256 tokenId,
+        uint256 _requestId,uint256 _tokenAmount)external{
+            if(_tokenAmount<s_userRWAInfoagainstRequestId[_requestId].valueInUSD){
+                revert RWA_Manager__NFTValueIsMoreThanSubmittedToken();
+            }
+           _burnCoins(s_userAssets[msg.sender][_requestId].valueInUSD);
+           // inefficient updating two mappings could have merged in one
+           // Improve in future version
+           s_userRWAInfoagainstRequestId[_requestId].tradable=true;
+           s_userAssets[msg.sender][_requestId].tradable=true;
+           emit TokenTradable(tokenId);
+
+        }
+
+
     /* 
     @param tokenId The ID of the NFT to be burned.
     @param _requestId The request ID of the asset to be withdrawn.
@@ -133,6 +155,7 @@ contract RWA_Manager is Ownable, ReentrancyGuard, IERC721Receiver {
             revert RWA_Manager__NotOwnerOfAsset();
         }
         valueOfToken = s_userRWAInfoagainstRequestId[_requestId].valueInUSD;
+
 
         _burnNFT(tokenId);
         _burnCoins(s_userAssets[msg.sender][_requestId].valueInUSD);

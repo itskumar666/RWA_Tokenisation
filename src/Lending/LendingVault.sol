@@ -20,6 +20,7 @@
 // view & pure functions
 
 // SPDX-License-Identifier: MIT
+
 pragma solidity ^0.8.20;
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
@@ -29,7 +30,7 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
 /* 
     @title LendingVault
     @author Ashutosh Kumar
-    @notice This contract is used to lend coins to users, it allows users to deposit coins, borrow coins, withdraw coins and return borrowed coins.
+    @notice This contract is used to lend coins to users, it allows users to deposit erc-20 coins, borrow coins, withdraw coins and return borrowed coins.
     @notice The contract is designed to be used with a specific token, which is passed during deployment.
     @dev This contract is pausable and can be paused by the owner.
     @dev This contract is protected by OpenZeppelin's ReentrancyGuard to prevent reentrancy attacks.
@@ -95,7 +96,7 @@ contract LendingVault is Pausable, Ownable, ReentrancyGuard {
 
     function unpause() external onlyOwner {
         _unpause();
-    }
+        }
     function changeMinBorrowCapacity(uint256 _newCapacity)external onlyOwner{
       minBorrowCapacity=_newCapacity;
       emit MinBorrowCapacityChanged(_newCapacity);
@@ -176,6 +177,7 @@ contract LendingVault is Pausable, Ownable, ReentrancyGuard {
             i_totalDepositedCoins+=_amount-i_userDebitBalance[_user];
             i_totalBorrowedCoins-=i_userDebitBalance[_user];
             i_userDebitBalance[_user]=0;
+            emit coinDeposited(_user,_amount-i_userDebitBalance[_user]);
         }
         else{
              i_userDebitBalance[_user]-=_amount;

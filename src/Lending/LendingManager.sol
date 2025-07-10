@@ -109,6 +109,7 @@ contract LendingManager is ReentrancyGuard, Pausable {
         i_nftVault = INFTVault(nftVault);
         i_rwaManager = IRWA_Manager(RWA_Manager); // assuming this contract is deployed by RWA_Manager
     }
+
     function depositCoinToLend(
         uint256 _amount,
         uint8 _interest,
@@ -184,6 +185,13 @@ contract LendingManager is ReentrancyGuard, Pausable {
             _interest * 1e16, // Convert percentage to fixed-point format
             _returnPeriod
         );
+    }
+
+// this function will be called by chainlink automation on fixed interval
+
+    function performUpkeep() external{
+
+
     }
 
     function _depositCoin(
