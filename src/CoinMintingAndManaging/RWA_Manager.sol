@@ -21,6 +21,17 @@
 // private
 // view & pure functions
 
+/* 
+@title RWA Manager
+@Author Ashutosh Kumar
+@Notice its the first contract where you submit your asset to mint NFT and coins and also burn nft & coins.
+@Notice asset can be withdrawn by submitting minted nft and coins.
+@DEV any dev looking for improvement can implement these things to make code more modular and secure.
+@DEV it is highly inefficient can a lot of improvement can be made, like making code modular for depositing & withdrawing nft and coins(internal). and also fix  updating two mappings.
+@DEV and also it can be made more secure by adding Pausable and ownable contract from openzeppelin;
+@DEV instead of importing contracts we can use their interfaces.
+*/
+
 pragma solidity ^0.8.20;
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {IERC721Receiver} from "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";

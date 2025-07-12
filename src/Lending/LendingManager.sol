@@ -19,6 +19,7 @@
 // private
 // view & pure functions
 
+
 // SPDX-License-Identifier: MIT
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
@@ -43,7 +44,7 @@ import {InterestAndHealthFactor} from "../Library/InterestAndHealthFactor.sol";
     @dev it will also check for liquidity and borrowing limits.
     @dev this will also check user collateral health and auction them for sale for undercollateralized loans. 
 */
-contract LendingManager is ReentrancyGuard, Pausable {
+contract LendingManager is ReentrancyGuard, Pausable, Ownable {
     using SafeERC20 for IERC20;
     using RWA_Types for RWA_Types.RWA_Info;
 
@@ -53,11 +54,15 @@ contract LendingManager is ReentrancyGuard, Pausable {
     error LendingManager__ExpectedMinimumAmount();
     error LendingManager__InsufficientBalance();
     error LendingManager__NFTValueIsLowerThanAmount();
+    error LendingManager__MoreThanAllowedInterest();
+    error LendingManager__MinBorrowCantBeZero();
+    error LendingManager__MinReturnPeriodNotSufficient();
+    error LendingManager__InsufficientReturnBalance();
 
     struct LendingInfo {
         uint256 amount;
         uint8 interest; //max 30%
-        uint8 minBorrow; //like 10%,5%
+        uint256 minBorrow; //in units of coin
         uint256 returnPeriod;
     }
     struct BorrowingInfo {
@@ -73,10 +78,12 @@ contract LendingManager is ReentrancyGuard, Pausable {
     IERC20 private immutable i_rwaCoin;
     IERC721 private immutable i_rwaNft;
     INFTVault private immutable i_nftVault;
+    address[] private borroweraddressArray; // array of borrower addresses
+    address private auctionHouse; // address of the auction house for liquidating NFTs
+    uint256 private minReturnPeriod; // minimum return period in seconds
 
     mapping(address user => LendingInfo lendingInfo) private i_lendingPool;
-    mapping(address user => BorrowingInfo borrowingInfo)
-        private i_borrowingPool;
+    mapping(address user => BorrowingInfo[]) private i_borrowingPoolArray;
 
     event coinDeposited(
         address indexed user,
@@ -84,6 +91,11 @@ contract LendingManager is ReentrancyGuard, Pausable {
         uint8 interest,
         uint8 minBorrow
     );
+    event coinReturned(
+        address indexed user,
+        uint256 indexed amount,
+        address indexed lender
+    );  
 
     modifier onlyValidAddress(address user) {
         if (user == address(0)) {
@@ -102,12 +114,25 @@ contract LendingManager is ReentrancyGuard, Pausable {
         address rwaCoin,
         address rwaNft,
         address nftVault,
-        address RWA_Manager
-    ) {
+        address RWA_Manager,
+        uint256 _minReturnPeriod,address auctionHouse
+    ) Ownable(msg.sender) {
         i_rwaCoin = IERC20(rwaCoin);
         i_rwaNft = IERC721(rwaNft);
         i_nftVault = INFTVault(nftVault);
-        i_rwaManager = IRWA_Manager(RWA_Manager); // assuming this contract is deployed by RWA_Manager
+        i_rwaManager = IRWA_Manager(RWA_Manager);
+        minReturnPeriod = _minReturnPeriod; // minimum return period in seconds
+        // assuming this contract is deployed by RWA_Manager
+    }
+
+    function setMinReturnPeriod(uint256 _minReturnPeriod) external onlyOwner {
+        minReturnPeriod = _minReturnPeriod;
+    }
+    function setAddressAuctionHouse(address _auctionHouse) external onlyOwner {
+        if (_auctionHouse == address(0)) {
+            revert LendingManager__InvalidAddress();
+        }
+        auctionHouse = _auctionHouse;
     }
 
     function depositCoinToLend(
@@ -122,6 +147,18 @@ contract LendingManager is ReentrancyGuard, Pausable {
         onlyValidAddress(msg.sender)
         onlyValidAmount(_amount)
     {
+        if (_amount <= 0) {
+            revert LendingManager__NotZeroAmount();
+        }
+        if (_interest > 30) {
+            revert LendingManager__MoreThanAllowedInterest();
+        }
+        if (minBorrow <= 0) {
+            revert LendingManager__MinBorrowCantBeZero();
+        }
+        if (_returnPeriod <= minReturnPeriod) {
+            revert LendingManager__MinReturnPeriodNotSufficient();
+        }
         i_rwaCoin.safeTransferFrom(msg.sender, address(this), _amount);
         _depositCoin(_amount, _interest, minBorrow, _returnPeriod);
         emit coinDeposited(msg.sender, _amount, _interest, minBorrow);
@@ -139,10 +176,15 @@ contract LendingManager is ReentrancyGuard, Pausable {
         onlyValidAddress(msg.sender)
     {
         LendingInfo storage lendingInfo = i_lendingPool[_lender];
-        (,,uint256 assetId_,,,uint256 valueInUSD_,
+        (
+            ,
+            ,
+            uint256 assetId_,
+            ,
+            ,
+            uint256 valueInUSD_,
             address owner_,
             bool tradable_
-            
         ) = i_rwaManager.s_userRWAInfoagainstRequestId(_assetId);
         if (_tokenIdNFT > 0) {
             if (i_rwaNft.ownerOf(_tokenIdNFT) != msg.sender) {
@@ -155,42 +197,92 @@ contract LendingManager is ReentrancyGuard, Pausable {
         if (_amount > lendingInfo.amount) {
             revert LendingManager__InsufficientBalance();
         }
-        if (valueInUSD_ < _amount) {
-            revert LendingManager__NFTValueIsLowerThanAmount();
-        }
-
-        i_rwaNft.safeTransferFrom(msg.sender, address(i_nftVault), _tokenIdNFT);
-        i_rwaCoin.safeTransfer(msg.sender, _amount);
-        _borrowCoin(
-            _amount,
-            _tokenIdNFT,
-            _lender,
-            _assetId
-        );
-        _calculateInterest(
+        uint256 interestAmount = _calculateInterest(
             _amount,
             lendingInfo.interest,
             lendingInfo.returnPeriod
-        );  
-        
-    }
-    function chainlinkLoanHealthFactor(
-        uint256 _amount,
-        uint8 _interest,
-        uint256 _returnPeriod
-    ) external view returns (uint256) {
-        // Calculate the health factor using InterestAndHealthFactor library
-        return InterestAndHealthFactor.calculateHealthFactor(
-            _amount,
-            _interest * 1e16, // Convert percentage to fixed-point format
-            _returnPeriod
         );
+
+        if (valueInUSD_ < _amount + interestAmount) {
+            revert LendingManager__NFTValueIsLowerThanAmount();
+        }
+        uint256 NFTValue = _amount + interestAmount;
+        i_rwaNft.safeTransferFrom(msg.sender, address(i_nftVault), _tokenIdNFT );
+        i_rwaCoin.safeTransfer(msg.sender, _amount);
+        _borrowCoin(_amount, _tokenIdNFT, _lender, _assetId);
+        i_nftVault.depositNFT(_tokenIdNFT,msg.sender,NFTValue);
     }
+    function returnCoinToLender(
+        address _lender,
+        uint256 _amount,
+        uint _tokenIdNFT
+    ) external nonReentrant whenNotPaused {
+        if (_amount <= 0) {
+            revert LendingManager__NotZeroAmount();
+        }
+        if (_lender == address(0)) {
+            revert LendingManager__InvalidAddress();
+        }
 
-// this function will be called by chainlink automation on fixed interval
+        // Update the borrowing info
+        BorrowingInfo[] storage borrowings = i_borrowingPoolArray[msg.sender];
+        for (uint256 i = 0; i < borrowings.length; i++) {
+            if (
+                borrowings[i].tokenIdNFT == _tokenIdNFT &&
+                !borrowings[i].isReturned
+            ) {
+                borrowings[i].returnTime = block.timestamp;
+                uint256 interestAmount = _calculateInterest(
+                    _amount,
+                    i_lendingPool[_lender].interest,
+                    block.timestamp - borrowings[i].borrowTime
+                );
+                if (interestAmount + borrowings[i].amount > _amount) {
+                    revert LendingManager__InsufficientReturnBalance();
+                }
+                borrowings[i].isReturned = true;
+                i_rwaCoin.safeTransferFrom(msg.sender, address(this), _amount);
+                i_rwaCoin.safeTransfer(_lender, _amount + interestAmount);
+                i_nftVault.tokenTransferToBorrower(_tokenIdNFT, msg.sender);
+                i_lendingPool[_lender].amount += _amount + interestAmount;
+                borrowings[i].amount = 0; // Reset the amount to zero after return
 
-    function performUpkeep() external{
+                break;
+            }
+        }
+        // Check if all borrowings are now returned, then clear storage
+        bool allReturned = true;
+        for (uint256 j = 0; j < borrowings.length; j++) {
+            if (!borrowings[j].isReturned) {
+                allReturned = false;
+                break;
+            }
+        }
+        if (allReturned) {
+            delete i_borrowingPoolArray[msg.sender];
+        }
+        emit coinReturned(msg.sender, _amount, _lender);
 
+    }
+    // this function will be called by chainlink automation on fixed interval
+
+    function performUpkeep() external {
+        for(uint256 j=0; j<borroweraddressArray.length;j++){
+
+         address k= borroweraddressArray[j];
+        for(uint256 i = 0; i < i_borrowingPoolArray[k].length; i++) {
+            BorrowingInfo storage borrowing = i_borrowingPoolArray[k][i];
+            if (!borrowing.isReturned && borrowing.returnTime < block.timestamp) {
+                // If the return time has passed and the coin is not returned, auction the NFT
+                i_nftVault.tokenTransferToAuctionHouseOnLiquidation(borrowing.tokenIdNFT,auctionHouse);
+                // ********** Transfer the borrowed amount back to the lender from this contract *******************
+                // rwaCoin.safeTransfer(, borrowing.amount);
+                borrowing.isReturned = true; 
+                i_borrowingPoolArray[k][i] = i_borrowingPoolArray[k][i_borrowingPoolArray[k].length - 1];
+                 i_borrowingPoolArray[k].pop();
+             
+            }
+        }}
 
     }
 
@@ -211,31 +303,49 @@ contract LendingManager is ReentrancyGuard, Pausable {
         address _lender,
         uint256 _assetId
     ) internal {
-        i_borrowingPool[msg.sender].amount += _amount;
-        i_borrowingPool[msg.sender].tokenIdNFT = _tokenIdNFT;
-        i_borrowingPool[msg.sender].lender = _lender;
-        i_borrowingPool[msg.sender].assetId = _assetId;
-        i_borrowingPool[msg.sender].borrowTime = block.timestamp;
-        i_borrowingPool[msg.sender].isReturned = false;
-        i_borrowingPool[msg.sender].returnTime =
-            block.timestamp +
-            i_lendingPool[_lender].returnPeriod;
-        i_nftVault.depositNFT(_tokenIdNFT, _lender);
-        i_lendingPool[_lender].amount -= _amount;
+        BorrowingInfo memory newBorrowing = BorrowingInfo({
+            amount: _amount,
+            tokenIdNFT: _tokenIdNFT,
+            lender: _lender,
+            assetId: _assetId,
+            borrowTime: block.timestamp,
+            returnTime: block.timestamp + i_lendingPool[_lender].returnPeriod,
+            isReturned: false
+        });
 
+        // Push to the user's borrow history array
+        i_borrowingPoolArray[msg.sender].push(newBorrowing);
+
+        // Deposit the NFT into the NFT vault
+        i_lendingPool[_lender].amount -= _amount;
+        // Add the borrower address to the array if not already present
+        bool exists = false;
+        for (uint256 i = 0; i < borroweraddressArray.length; i++)
+        {
+            if (borroweraddressArray[i] == msg.sender) {
+                exists = true;
+                break;  
+            } 
+            }
+              if(!exists){
+                    borroweraddressArray.push(msg.sender);
+                }
+   
     }
     function _calculateInterest(
         uint256 _amount,
         uint8 _interest,
         uint256 _returnPeriod
-    ) internal {
+    ) internal pure returns (uint256) {
         // Calculate interest using InterestAndHealthFactor library
-        uint256 interestAmount = InterestAndHealthFactor.calculateSimpleInterest(
-            _amount,
-            _interest * 1e16, // Convert percentage to fixed-point format
-            _returnPeriod
-        );
+        uint256 interestAmount = InterestAndHealthFactor
+            .calculateSimpleInterest(
+                _amount,
+                _interest * 1e16, // Convert percentage to fixed-point format
+                _returnPeriod
+            );
         // Update the borrowing info with the calculated interest
-        i_borrowingPool[msg.sender].amount += interestAmount;
+        // i_borrowingPool[msg.sender].amount += interestAmount;
+        return interestAmount;
     }
 }

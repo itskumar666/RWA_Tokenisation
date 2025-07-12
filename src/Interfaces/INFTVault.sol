@@ -27,7 +27,7 @@ interface INFTVault {
      * @param tokenId The ID of the NFT to deposit.
      * @param _borrower The address of the user who is depositing the NFT.
      */
-    function depositNFT(uint256 tokenId, address _borrower) external;
+    function depositNFT(uint256 tokenId, address _borrower,uint256 _NFTValue) external;
 
     /**
      * @dev Transfers an NFT from the vault back to the borrower.
