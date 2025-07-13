@@ -1,72 +1,64 @@
-🏦 Decentralized Bank on Ethereum
-Overview
-This project implements a Decentralized Bank on Ethereum allowing:
+<p align="center">
+  <img src="https://raw.githubusercontent.com/itskumar666/RWA_Tokenisation/main/assets/banner.png" alt="Decentralized Bank on Ethereum" width="600"/>
+</p>
 
-✅ Staking – Earn rewards by staking your tokens securely.
-✅ Lending & Borrowing – Supply and borrow assets with interest mechanisms.
-✅ NFT Integration – Tokenize real-world assets and integrate them into lending/staking workflows.
-✅ Auction House – Auction NFTs in a decentralized, transparent manner.
-✅ Proxy Contracts – Upgradable architecture for production readiness.
-✅ Foundry – Built using blazing-fast Foundry for testing, fuzzing, and deployment.
+<p align="center">
+  <b>Decentralized Bank on Ethereum | Foundry + Solidity</b><br>
+  Stake, lend, borrow, tokenize assets as NFTs, and auction them in a fully on-chain decentralized bank.
+</p>
 
-All contracts are audit-friendly, gas-optimized, and modular to support composability in DeFi ecosystems.
+<p align="center">
+  <a href="https://youtube.com/@Felinophile666/streams"><img src="https://img.shields.io/badge/YouTube-Live_Streams-red?logo=youtube&logoColor=white"></a>
+  <img src="https://img.shields.io/badge/Built%20with-Foundry-blueviolet?logo=ethereum&logoColor=white">
+  <img src="https://img.shields.io/badge/License-MIT-green">
+</p>
 
-Tech Stack
-Solidity (0.8.x) – Core smart contracts.
+---
 
-Foundry (Forge, Anvil, Cast) – Testing, local node, interaction.
+# 🏦 Decentralized Bank on Ethereum
 
-OpenZeppelin – Security and reusable contract components.
+A **modular, audit-friendly decentralized bank** built using **Solidity + Foundry**, enabling:
 
-Proxy Pattern – UUPS/Transparent for upgradability.
+✅ **Staking** – Earn rewards by staking tokens.  
+✅ **Lending & Borrowing** – Supply/borrow assets with interest.  
+✅ **NFT Tokenization** – Mint, stake, and collateralize NFTs.  
+✅ **Auction House** – Decentralized NFT auctions.  
+✅ **Proxy Upgradability** – Safe upgrades for contracts.  
+✅ **Gas Optimization** – Efficient, scalable, audit-ready code.
 
-CI/CD (optional) – Suggested GitHub Actions for automatic tests on PR.
+---
 
-📚 Documentation
-Foundry Book
+## 🚀 Features
 
-OpenZeppelin Contracts
+- **Stake to Earn**: Users stake tokens and earn rewards.
+- **Lend & Borrow**: Supply and borrow assets with interest mechanisms.
+- **NFT Collateral**: Use NFTs as collateral in lending/borrowing.
+- **Auction NFTs**: List, bid, and settle NFT auctions fully on-chain.
+- **Proxy Pattern**: Upgradable architecture with UUPS/Transparent proxy.
+- **Tested with Foundry**: Includes unit, fuzz, and invariant tests.
 
-🛠️ Foundry Usage
-Build
-bash
-Copy
-Edit
-forge build
-Test (including fuzz & invariant tests)
-bash
-Copy
-Edit
-forge test -vvv
-Format
-bash
-Copy
-Edit
-forge fmt
-Gas Snapshots
-bash
-Copy
-Edit
-forge snapshot
-Local Node (Anvil)
-bash
-Copy
-Edit
-anvil
-Deploy
-bash
-Copy
-Edit
-forge script script/Deploy.s.sol:DeployScript --rpc-url <RPC_URL> --private-key <PRIVATE_KEY> --broadcast
-Interact (Cast)
-bash
-Copy
-Edit
-cast call <contract_address> <function_signature> [args...]
-Project Structure
-bash
-Copy
-Edit
+---
+
+## 🛠 Tech Stack
+
+- **Solidity (0.8.x)**
+- **Foundry (Forge, Anvil, Cast)**
+- **OpenZeppelin Contracts**
+- **Proxy Pattern (UUPS/Transparent)**
+- **CI/CD Ready** (GitHub Actions)
+
+---
+
+## 📚 Documentation
+
+- [📘 Foundry Book](https://book.getfoundry.sh/)
+- [🔗 OpenZeppelin Contracts](https://docs.openzeppelin.com/contracts/)
+
+---
+
+## 📂 Directory Structure
+
+```
 contracts/
     Staking/
     Lending/
@@ -76,58 +68,108 @@ contracts/
 test/
 script/
 foundry.toml
-contracts/ – All Solidity source files.
+```
 
-test/ – Foundry test files with unit, fuzz, and integration tests.
+- `contracts/` – All Solidity source files
+- `test/` – Unit, fuzz, and invariant tests
+- `script/` – Deployment and upgrade scripts
+- `foundry.toml` – Project configuration
 
-script/ – Deployment and upgrade scripts.
+---
 
-foundry.toml – Configuration for the Foundry project.
+## 🧪 Quick Usage
 
-Features
-✅ Stake to Earn – Users stake tokens and earn periodic rewards.
-✅ Lending Pools – Supply and borrow against collateral with interest rate logic.
-✅ NFT Collateral – Use NFTs as collateral in the lending system.
-✅ Auction House – Bid, list, and settle NFT auctions transparently.
-✅ Proxy Upgradability – Upgrade contract logic while maintaining state.
-✅ Extensive Tests – Cover core logic with fuzz and invariant tests using Foundry.
+### Build
 
-🚀 Roadmap
- Core staking + reward system
+```bash
+forge build
+```
 
- Lending & borrowing pools
+### Test with detailed output
 
- NFT minting and collateral support
+```bash
+forge test -vvv
+```
 
- Auction house for NFTs
+### Snapshot gas usage
 
- Proxy-based upgradability
+```bash
+forge snapshot
+```
 
- Chainlink integration for price feeds
+### Run local node
 
- Frontend dApp integration using wagmi/viem
+```bash
+anvil
+```
 
-🤝 Contributing
-PRs and issues are welcome for gas optimizations, advanced collateral management, and Chainlink integrations.
+### Deploy
 
-📜 License
-MIT
+```bash
+forge script script/Deploy.s.sol:DeployScript --rpc-url <RPC_URL> --private-key <PRIVATE_KEY> --broadcast
+```
 
-🧪 Testing & Best Practices
-Use forge test -vvv for verbose test output.
+### Interact
 
-Write fuzz tests for deposit/withdraw and borrow/repay flows.
+```bash
+cast call <contract_address> <function_signature> [args...]
+```
 
-Use forge snapshot to monitor gas costs during PRs.
+---
 
-Consider using Slither and Mythril for static analysis before deployment.
+## 🗺 Roadmap
 
-👨‍💻 Author
-Ashutosh (Felinophile666)
+✅ Core staking and reward system  
+✅ Lending & borrowing pools  
+✅ NFT minting & collateral support  
+✅ NFT auction house  
+✅ Proxy-based upgradability  
+🔜 Chainlink price feeds  
+🔜 Frontend dApp (wagmi/viem)
 
-YouTube Streams
+---
 
-GitHub
+## 🤝 Contributing
 
-✨ Let’s Build Together
-If you’re working on DeFi, NFT financialization, or RWA tokenization, feel free to fork, contribute, or discuss potential integrations. This repo can be the foundation for your decentralized bank or asset-backed lending platform.
+PRs and issues are welcome for:
+
+- Gas optimizations
+- Advanced collateral strategies
+- Chainlink integrations
+- Frontend contributions
+
+---
+
+## 🪪 License
+
+This project is licensed under the [MIT License](LICENSE).
+
+---
+
+## 🧪 Testing & Best Practices
+
+✅ Run `forge test -vvv` for detailed test outputs  
+✅ Write fuzz tests for deposit/withdraw and borrow/repay flows  
+✅ Use `forge snapshot` to monitor gas costs  
+✅ Run **Slither** or **Mythril** for static analysis before deployment
+
+---
+
+## 👨‍💻 Author
+
+**Ashutosh (Felinophile666)**
+
+🎥 [YouTube Streams](https://youtube.com/@Felinophile666/streams)  
+🐙 [GitHub Profile](https://github.com/itskumar666)
+
+---
+
+## ✨ Why This Project?
+
+I am **mastering advanced Solidity development with Foundry**, using **rigorous testing, fuzzing, and gas optimization** to build production-grade decentralized finance protocols.
+
+If you're working on DeFi, RWA tokenization, or advanced Web3 projects, feel free to fork, test, and extend this repository.
+
+> **“Decentralization is the future of banking. Let’s build it.”**
+
+---
