@@ -21,6 +21,7 @@
 
 
 // SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
@@ -115,8 +116,9 @@ contract LendingManager is ReentrancyGuard, Pausable, Ownable {
         address rwaNft,
         address nftVault,
         address RWA_Manager,
-        uint256 _minReturnPeriod,address auctionHouse
+        uint256 _minReturnPeriod,address _auctionHouse
     ) Ownable(msg.sender) {
+         auctionHouse = _auctionHouse;
         i_rwaCoin = IERC20(rwaCoin);
         i_rwaNft = IERC721(rwaNft);
         i_nftVault = INFTVault(nftVault);

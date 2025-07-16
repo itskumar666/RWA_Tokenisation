@@ -44,7 +44,6 @@ contract auctionHouse is IERC721Receiver,Ownable{
         uint256 tokenId;
         uint256 startingPrice;
         uint256 endTime;
-        bool isActive;
         uint256 highestBid;
         address highestBidder;
     }
@@ -117,9 +116,7 @@ contract auctionHouse is IERC721Receiver,Ownable{
 
     function bidOnNFT(uint256 tokenId, uint256 bidAmount) external notZeroAmount(bidAmount) notZeroAddress(msg.sender) {
         Auction storage auction = auctions[tokenId];
-        if (!auction.isActive) {
-            revert AuctionHouse__InvalidAuction();
-        }
+     
         if (bidAmount <= auction.highestBid && bidAmount < auction.startingPrice) {
             revert AuctionHouse__BidHigherThanCurrentHighest();
         }
@@ -152,7 +149,6 @@ contract auctionHouse is IERC721Receiver,Ownable{
 
         // Transfer the NFT to the highest bidder
         if (auction.highestBidder != address(0)) {
-            auction.isActive = false;
             i_rwaNFT.safeTransferFrom(address(this), auction.highestBidder, tokenId);
             delete auctions[tokenId];
             emit AuctionHouse__AuctionEndedWinnerAnnounced(
@@ -181,7 +177,6 @@ contract auctionHouse is IERC721Receiver,Ownable{
             tokenId: tokenId,
             startingPrice: startingPrice,
             endTime: block.timestamp + auctionDuration,
-            isActive: true,
             highestBid: startingPrice,
             highestBidder: address(this)
         });
