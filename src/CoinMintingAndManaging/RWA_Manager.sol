@@ -59,6 +59,16 @@ contract RWA_Manager is Ownable, ReentrancyGuard, IERC721Receiver, AccessControl
     error RWA_Manager__NFTValueIsMoreThanSubmittedToken();
     error RWA_Manager__TokenAlreadyMinted();
     error RWA_Manager__ValueNotUpdatedFromVerifiedAssetsContract();
+    error RWA_Manager__InsufficientETH();
+    error RWA_Manager__ETHrefundFailed();
+    error RWA_Manager__InsufficientCoins();
+    error RWA_Manager__ZeroAddress();
+    error RWA_Manager__ZeroAmount();
+
+    // Events
+    event AssetDeposited(address indexed owner, uint256 indexed requestId, uint256 assetValue, uint256 valueInUSD);
+    event AssetValueUpdated(address indexed owner, uint256 indexed requestId, uint256 oldValue, uint256 newValue);
+    event NFTTradabilityChanged(address indexed owner, uint256 indexed requestId, uint256 tokenId, bool tradable);
 
     // RWA_Verification private immutable i_rwaV;
     bytes32 public constant MEMBER_ROLE = keccak256("MEMBER_ROLE");
@@ -66,6 +76,7 @@ contract RWA_Manager is Ownable, ReentrancyGuard, IERC721Receiver, AccessControl
     RWA_NFT private immutable i_rwaN;
     RWA_Coins private immutable i_rwaC;
     uint256 private valueOfToken;
+    uint256 public ethPriceFromChainlink = 0.001 ether; // Default ETH price, should be updated via oracle
     //storing asset information for each asset using requestId
     mapping(uint256 => RWA_Types.RWA_Info) public s_userRWAInfoagainstRequestId;
     //storing user information for every asset using user address and requestId
@@ -92,6 +103,7 @@ contract RWA_Manager is Ownable, ReentrancyGuard, IERC721Receiver, AccessControl
         address _rwaC
     ) Ownable(msg.sender) {
         // i_rwaV = RWA_Verification(_rwaV);
+        i_rwaN = RWA_NFT(_rwaN); 
         i_rwaVA = RWA_VerifiedAssets(_rwaVA);
         i_rwaC = RWA_Coins(_rwaC);
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
@@ -108,6 +120,13 @@ contract RWA_Manager is Ownable, ReentrancyGuard, IERC721Receiver, AccessControl
         address _member
     ) external onlyOwner {
         _revokeRole(MEMBER_ROLE, _member);
+    }
+
+    function updateEthPrice(uint256 _newPrice) external onlyOwner {
+        if (_newPrice == 0) {
+            revert RWA_Manager__ZeroAmount();
+        }
+        ethPriceFromChainlink = _newPrice;
     }
     function onERC721Received(
         address operator,
@@ -130,44 +149,56 @@ contract RWA_Manager is Ownable, ReentrancyGuard, IERC721Receiver, AccessControl
     // It takes the address of the user, the request ID, and the token URI as parameters.
     // ******* before calling this function make sure that the asset is verified by RWA_VerifiedAssets contract *************
     function depositRWAAndMintNFT(
-        address _to,
         uint256 _requestId,
-        string memory tokenURI
-    ) public nonReentrant {
-        (
-            RWA_Types.assetType assetType_,
-            string memory assetName_,
-            uint256 assetId_,
-            bool isLocked_,
-            bool isVerified,
-            uint256 valueInUSD_,
-            ,
-
-        ) = i_rwaVA.verifiedAssets(_to, _requestId);
-        if (s_userRWAInfoagainstRequestId[_requestId].assetId != 0) {
-            // Check if the asset is already verified
-            // If it is, revert the transaction
-            revert RWA_Manager__TokenAlreadyMinted();
+        uint256 _assetValue,
+        address _assetOwner,
+        string memory _tokenURI,
+        uint256 _valueInUSD
+    ) external payable onlyMember {
+        // Input validation
+        if (_assetOwner == address(0)) {
+            revert RWA_Manager__ZeroAddress();
         }
-        if (!isVerified) {
+        if (_assetValue == 0 || _valueInUSD == 0) {
+            revert RWA_Manager__ZeroAmount();
+        }
+        if (msg.value != ethPriceFromChainlink) {
+            revert RWA_Manager__InsufficientETH();
+        }
+
+        // Get asset details from verified assets contract - use separate variables to avoid stack too deep
+        (, , uint256 assetId_, , bool isVerified_, , , ) = i_rwaVA.verifiedAssets(_assetOwner, _requestId);
+
+        // Verify asset is registered and verified
+        if (!isVerified_ || assetId_ != _requestId) {
             revert RWA_Manager__AssetNotVerified();
         }
-        if (valueInUSD_ <= 0) {
-            revert RWA_Manager__AssetValueNotPositive();
-        }
-        _mintNFT(_to, tokenURI, assetType_, assetName_, assetId_, valueInUSD_);
 
-        _mintCoins(_to, valueInUSD_);
-        s_userAssets[_to][_requestId] = RWA_Types.RWA_Info({
+        // Get asset type and name separately
+        (RWA_Types.assetType assetType_, string memory assetName_, , , , , , ) = i_rwaVA.verifiedAssets(_assetOwner, _requestId);
+
+        // Mint NFT
+        _mintNFT(_assetOwner, _tokenURI, assetType_, assetName_, _requestId, _valueInUSD);
+        
+        // Mint coins
+        _mintCoins(_assetOwner, _valueInUSD);
+
+        // Store asset information - create struct directly
+        RWA_Types.RWA_Info memory newAsset = RWA_Types.RWA_Info({
             assetType: assetType_,
             assetName: assetName_,
-            assetId: assetId_,
-            isLocked: isLocked_, // Because the asset is being deposited and minted
-            isVerified: isVerified,
-            valueInUSD: valueInUSD_,
-            owner: msg.sender,
-            tradable: false // Because they already have minted coin and cant get extra coin from lendingVault
+            assetId: _requestId,
+            isLocked: false,
+            isVerified: true,
+            valueInUSD: _valueInUSD,
+            owner: _assetOwner,
+            tradable: false // Initially not tradable until coins are burned
         });
+
+        s_userRWAInfoagainstRequestId[_requestId] = newAsset;
+        s_userAssets[_assetOwner][_requestId] = newAsset;
+
+        emit AssetDeposited(_assetOwner, _requestId, _assetValue, _valueInUSD);
     }
 
     // submit all coins minted against this token to make token tradable on lending platform
@@ -178,10 +209,23 @@ contract RWA_Manager is Ownable, ReentrancyGuard, IERC721Receiver, AccessControl
         uint256 _requestId,
         uint256 _tokenAmount
     ) external {
+        // Input validation
+        if (_tokenAmount == 0) {
+            revert RWA_Manager__ZeroAmount();
+        }
+        // Check if asset exists
+        if (s_userAssets[msg.sender][_requestId].assetId != _requestId) {
+            revert RWA_Manager__AssetNotVerified();
+        }
         if (
             _tokenAmount < s_userRWAInfoagainstRequestId[_requestId].valueInUSD
         ) {
             revert RWA_Manager__NFTValueIsMoreThanSubmittedToken();
+        }
+        if (
+            s_userAssets[msg.sender][_requestId].owner != msg.sender
+        ) {
+            revert RWA_Manager__NotOwnerOfAsset();
         }
         _burnCoins(s_userAssets[msg.sender][_requestId].valueInUSD);
         // inefficient updating two mappings could have merged in one
@@ -189,6 +233,7 @@ contract RWA_Manager is Ownable, ReentrancyGuard, IERC721Receiver, AccessControl
         s_userRWAInfoagainstRequestId[_requestId].tradable = true;
         s_userAssets[msg.sender][_requestId].tradable = true;
         emit TokenTradable(tokenId);
+        emit NFTTradabilityChanged(msg.sender, _requestId, tokenId, true);
     }
 
     /* 
@@ -232,6 +277,14 @@ contract RWA_Manager is Ownable, ReentrancyGuard, IERC721Receiver, AccessControl
         uint256 _requestId,
         uint256 _valueInUSD
     ) external nonReentrant onlyMember {
+        // Input validation
+        if (_to == address(0)) {
+            revert RWA_Manager__ZeroAddress();
+        }
+        if (_valueInUSD == 0) {
+            revert RWA_Manager__ZeroAmount();
+        }
+        
          (
            ,
           ,
@@ -255,30 +308,42 @@ contract RWA_Manager is Ownable, ReentrancyGuard, IERC721Receiver, AccessControl
         uint256 difference = 0;
    
         if (valueInUSD_<= _valueInUSD) {
-            difference = _valueInUSD - s_userAssets[msg.sender][_requestId]
+            difference = _valueInUSD - s_userAssets[_to][_requestId]
                 .valueInUSD;
+             uint256 oldValue = s_userAssets[_to][_requestId].valueInUSD;
              _mintCoins(_to, difference);
              s_userRWAInfoagainstRequestId[_requestId].valueInUSD = _valueInUSD;
-             s_userAssets[msg.sender][_requestId].valueInUSD = _valueInUSD;
+             s_userAssets[_to][_requestId].valueInUSD = _valueInUSD;
              i_rwaVA.upDateAssetValue(_to, _requestId, _valueInUSD, isLocked_, tradable);
+             emit AssetValueUpdated(_to, _requestId, oldValue, _valueInUSD);
         }
 
 
         if (valueInUSD_ > _valueInUSD) {
 
-            difference = s_userAssets[msg.sender][_requestId]
+            difference = s_userAssets[_to][_requestId]
                 .valueInUSD - _valueInUSD;
-            if (difference > i_rwaC.balanceOf(msg.sender)) {
+            if (difference > i_rwaC.balanceOf(_to)) {
                 
-                s_userAssets[msg.sender][_requestId].tradable = false;
-                s_userAssets[msg.sender][_requestId].isLocked = true;
+                s_userAssets[_to][_requestId].tradable = false;
+                s_userAssets[_to][_requestId].isLocked = true;
                 s_userRWAInfoagainstRequestId[_requestId].tradable = false;
                 s_userRWAInfoagainstRequestId[_requestId].isLocked = true;
                 s_userRWAInfoagainstRequestId[_requestId].valueInUSD = _valueInUSD;
-                s_userAssets[msg.sender][_requestId].valueInUSD = _valueInUSD;
+                s_userAssets[_to][_requestId].valueInUSD = _valueInUSD;
                 // Update the asset value in the verified assets contract
-                i_rwaVA.upDateAssetValue(_to, _requestId, _valueInUSD, false, true);
+                i_rwaVA.upDateAssetValue(_to, _requestId, _valueInUSD, true, false);
                 revert RWA_Manager__BalanceMustBeGreaterThanBurnAmount();
+            } else {
+                // User has sufficient balance - burn the difference and update values
+                // Transfer coins from user to contract and burn them
+                uint256 oldValue = s_userAssets[_to][_requestId].valueInUSD;
+                IERC20(address(i_rwaC)).safeTransferFrom(_to, address(this), difference);
+                i_rwaC.burn(difference);
+                s_userRWAInfoagainstRequestId[_requestId].valueInUSD = _valueInUSD;
+                s_userAssets[_to][_requestId].valueInUSD = _valueInUSD;
+                i_rwaVA.upDateAssetValue(_to, _requestId, _valueInUSD, isLocked_, tradable);
+                emit AssetValueUpdated(_to, _requestId, oldValue, _valueInUSD);
             }
            
         }
@@ -366,7 +431,7 @@ contract RWA_Manager is Ownable, ReentrancyGuard, IERC721Receiver, AccessControl
     }
     function _burnCoins(uint256 amount) private {
         uint256 balance = i_rwaC.balanceOf(msg.sender);
-        if (balance < valueOfToken) {
+        if (balance < amount) {
             revert RWA_Manager__BalanceMustBeGreaterThanBurnAmount();
         }
 
