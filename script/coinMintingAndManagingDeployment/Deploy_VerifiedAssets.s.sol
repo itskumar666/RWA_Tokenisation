@@ -8,7 +8,7 @@ contract DeployVerifiedAssets is Script{
         address deployerKey = address(uint160(vm.envUint("PRIVATE_KEY")));
         // address deployerKey = vm.envUint("PRIVATE_KEY"); // from .env
         vm.startBroadcast(deployerKey);
-        RWA_VerifiedAssets va = new RWA_VerifiedAssets(deployerKey);
+        va = new RWA_VerifiedAssets(deployerKey);
         vm.stopBroadcast();
         console.log("VerifiedAssets deployed at:", address(va));
         return va;

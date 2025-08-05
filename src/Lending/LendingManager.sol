@@ -34,7 +34,7 @@ import {RWA_Types} from "../CoinMintingAndManaging/RWA_Types.sol";
 import {InterestAndHealthFactor} from "../Library/InterestAndHealthFactor.sol";
 
 /* 
-    @title LendingVault
+    @title Lending Manager
     @author Ashutosh Kumar
     @notice This contract is used to lend coins to users, it allows users to deposit coins, borrow coins, withdraw coins and return borrowed coins.
     @Notice this contract also accept nft as collateral for borrowing coins, it checks if the nft is valid and then transfers the coin to the user.
@@ -175,55 +175,49 @@ contract LendingManager is ReentrancyGuard, Pausable, Ownable {
         _depositCoin(_amount, _interest, minBorrow, _returnPeriod);
         emit coinDeposited(msg.sender, _amount, _interest, minBorrow);
     }
-    function borrowCoin(
-        uint256 _amount,
-        uint256 _tokenIdNFT,
-        address _lender,
-        uint256 _assetId
-    )
-        external
-        nonReentrant
-        whenNotPaused
-        onlyValidAmount(_amount)
-        onlyValidAddress(msg.sender)
-    {
-        LendingInfo storage lendingInfo = i_lendingPool[_lender];
-        (
-            ,
-            ,
-            uint256 assetId_,
-            ,
-            ,
-            uint256 valueInUSD_,
-            address owner_,
-            bool tradable_
-        ) = i_rwaManager.getUserRWAInfoagainstRequestId(_assetId);
-        if (_tokenIdNFT < 0) {
-            if (owner_ != msg.sender) {
-                revert LendingManager__InvalidToken();
-            }
+   function borrowCoin(
+    uint256 _amount,
+    uint256 _tokenIdNFT,
+    address _lender,
+    uint256 _assetId
+)
+    external
+    nonReentrant
+    whenNotPaused
+    onlyValidAmount(_amount)
+    onlyValidAddress(msg.sender)
+{
+    LendingInfo storage lendingInfo = i_lendingPool[_lender];
+    
+    // Get the RWA info as a struct instead of destructuring
+    RWA_Types.RWA_Info memory rwaInfo = i_rwaManager.getUserRWAInfoagainstRequestId(_assetId);
+    
+    if (_tokenIdNFT < 0) {
+        if (rwaInfo.owner != msg.sender) {
+            revert LendingManager__InvalidToken();
         }
-        if (_amount < lendingInfo.minBorrow) {
-            revert LendingManager__ExpectedMinimumAmount();
-        }
-        if (_amount > lendingInfo.amount) {
-            revert LendingManager__InsufficientBalance();
-        }
-        uint256 interestAmount = _calculateInterest(
-            _amount,
-            lendingInfo.interest,
-            lendingInfo.returnPeriod
-        );
-
-        if (valueInUSD_ < _amount + interestAmount) {
-            revert LendingManager__NFTValueIsLowerThanAmount();
-        }
-        uint256 NFTValue = _amount + interestAmount;
-        i_rwaNft.safeTransferFrom(msg.sender, address(i_nftVault), _tokenIdNFT );
-        i_rwaCoin.safeTransfer(msg.sender, _amount);
-        _borrowCoin(_amount, _tokenIdNFT, _lender, _assetId);
-        i_nftVault.depositNFT(_tokenIdNFT,msg.sender,NFTValue);
     }
+    if (_amount < lendingInfo.minBorrow) {
+        revert LendingManager__ExpectedMinimumAmount();
+    }
+    if (_amount > lendingInfo.amount) {
+        revert LendingManager__InsufficientBalance();
+    }
+    uint256 interestAmount = _calculateInterest(
+        _amount,
+        lendingInfo.interest,
+        lendingInfo.returnPeriod
+    );
+
+    if (rwaInfo.valueInUSD < _amount + interestAmount) {
+        revert LendingManager__NFTValueIsLowerThanAmount();
+    }
+    uint256 NFTValue = _amount + interestAmount;
+    i_rwaNft.safeTransferFrom(msg.sender, address(i_nftVault), _tokenIdNFT);
+    i_rwaCoin.safeTransfer(msg.sender, _amount);
+    _borrowCoin(_amount, _tokenIdNFT, _lender, _assetId);
+    i_nftVault.depositNFT(_tokenIdNFT, msg.sender, NFTValue);
+}
     function returnCoinToLender(
         address _lender,
         uint256 _amount,
@@ -276,11 +270,11 @@ contract LendingManager is ReentrancyGuard, Pausable, Ownable {
         emit coinReturned(msg.sender, _amount, _lender);
 
     }
-    function withdrawPartiallLendedCoin(Uint256 _amount) external{
+    function withdrawPartialLendedCoin(uint256 _amount) external {
         _withdrawLendedCoin(_amount, msg.sender);
 
     }
-    function withdrawtotalLendedCoin(_amount)external{
+    function withdrawtotalLendedCoin(uint256 _amount)external{
           _withdrawLendedCoin(_amount, msg.sender);
           for(uint256 i = 0; i < lendersArray.length; i++) {
               if (lendersArray[i] == msg.sender) {
@@ -292,16 +286,16 @@ contract LendingManager is ReentrancyGuard, Pausable, Ownable {
     }
 
 
-    function changeMinBorrowCapacity(
-        address _lender,
-        uint256 _newCapacity
-    ) external onlyOwner {
-        if (_newCapacity <= 0) {
-            revert LendingManager__MinBorrowCantBeZero();
-        }
-         i_nftVault.changeMinBorrowCapacity(_lender, _newCapacity);
-        i_lendingPool[_lender].minBorrow = _newCapacity;
-    }
+    // function changeMinBorrowCapacity(
+    //     address _lender,
+    //     uint256 _newCapacity
+    // ) external onlyOwner {
+    //     if (_newCapacity <= 0) {
+    //         revert LendingManager__MinBorrowCantBeZero();
+    //     }
+    //      i_nftVault.changeMinBorrowCapacity(_lender, _newCapacity);
+    //     i_lendingPool[_lender].minBorrow = _newCapacity;
+    // }
     // this function will be called by chainlink automation on fixed interval
 
     function performUpkeep() external {
@@ -363,11 +357,11 @@ contract LendingManager is ReentrancyGuard, Pausable, Ownable {
                 exists = true;
                 break;  
             } 
+               unchecked{i++;}
             }
               if(!exists){
                     borroweraddressArray.push(msg.sender);
                 }
-                unchecked{i++;}
 
     }
 

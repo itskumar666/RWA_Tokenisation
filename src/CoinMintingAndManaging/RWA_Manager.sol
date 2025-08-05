@@ -402,22 +402,10 @@ contract RWA_Manager is Ownable, ReentrancyGuard, IERC721Receiver, AccessControl
         return s_userAssets[_user][_requestId].tradable;
     }
       // Implement this function if missing
-function getUserRWAInfoagainstRequestId(uint256 assetId) external view  returns (
-    uint256, uint256, uint256, uint256, uint256, uint256, address, bool
-) {
-    return (
-        uint256(s_userRWAInfoagainstRequestId[assetId].assetType),
-        uint256(uint160(bytes20(bytes(s_userRWAInfoagainstRequestId[assetId].assetName)))),
-        s_userRWAInfoagainstRequestId[assetId].assetId,
-        s_userRWAInfoagainstRequestId[assetId].valueInUSD,
-        s_userRWAInfoagainstRequestId[assetId].isLocked ? 1 : 0,
-        s_userRWAInfoagainstRequestId[assetId].tradable ? 1 : 0,
-        s_userRWAInfoagainstRequestId[assetId].owner,
-        s_userRWAInfoagainstRequestId[assetId].isVerified
-    );
+// Replace the problematic function with this:
+function getUserRWAInfoagainstRequestId(uint256 assetId) external view returns (RWA_Types.RWA_Info memory) {
+    return s_userRWAInfoagainstRequestId[assetId];
 }
-    
-
 
     
 }

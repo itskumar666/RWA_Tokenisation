@@ -83,7 +83,7 @@ contract LendingVault is Pausable, Ownable, ReentrancyGuard {
     @params _minBorrowCapacity Minimum amount of coin that can be borrowed by user like 1000 i_rwaCoin or i_totalCoinInPool/10
 
     */
-    constructor(address _rwaCoinAddress,uint256 _minBorrowCapacity,address _lendingManager) Ownable(_lendingManager) {
+    constructor(uint256 _minBorrowCapacity,address _lendingManager) Ownable(_lendingManager) {
         // i_rwaCoin = IERC20(_rwaCoinAddress);
         minBorrowCapacity=_minBorrowCapacity;
     }
