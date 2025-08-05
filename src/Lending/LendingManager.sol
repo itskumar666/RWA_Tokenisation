@@ -82,6 +82,7 @@ contract LendingManager is ReentrancyGuard, Pausable, Ownable {
     address[] private borroweraddressArray; // array of borrower addresses
     address private auctionHouse; // address of the auction house for liquidating NFTs
     uint256 private minReturnPeriod; // minimum return period in seconds
+    address[] private lendersArray;
 
     mapping(address user => LendingInfo lendingInfo) private i_lendingPool;
     mapping(address user => BorrowingInfo[]) private i_borrowingPoolArray;
@@ -116,15 +117,22 @@ contract LendingManager is ReentrancyGuard, Pausable, Ownable {
         address rwaNft,
         address nftVault,
         address RWA_Manager,
-        uint256 _minReturnPeriod,address _auctionHouse
+        uint256 _minReturnPeriod,
+        address _auctionHouse
     ) Ownable(msg.sender) {
+        
+        if (rwaCoin == address(0) || rwaNft == address(0) || nftVault == address(0) || RWA_Manager == address(0)) {
+            revert LendingManager__InvalidAddress();
+        }
+        if (_minReturnPeriod <= 0) {
+            revert LendingManager__MinReturnPeriodNotSufficient();
+        }
          auctionHouse = _auctionHouse;
         i_rwaCoin = IERC20(rwaCoin);
         i_rwaNft = IERC721(rwaNft);
         i_nftVault = INFTVault(nftVault);
         i_rwaManager = IRWA_Manager(RWA_Manager);
         minReturnPeriod = _minReturnPeriod; // minimum return period in seconds
-        // assuming this contract is deployed by RWA_Manager
     }
 
     function setMinReturnPeriod(uint256 _minReturnPeriod) external onlyOwner {
@@ -161,6 +169,8 @@ contract LendingManager is ReentrancyGuard, Pausable, Ownable {
         if (_returnPeriod <= minReturnPeriod) {
             revert LendingManager__MinReturnPeriodNotSufficient();
         }
+        lendersArray.push(msg.sender);
+
         i_rwaCoin.safeTransferFrom(msg.sender, address(this), _amount);
         _depositCoin(_amount, _interest, minBorrow, _returnPeriod);
         emit coinDeposited(msg.sender, _amount, _interest, minBorrow);
@@ -188,8 +198,8 @@ contract LendingManager is ReentrancyGuard, Pausable, Ownable {
             address owner_,
             bool tradable_
         ) = i_rwaManager.getUserRWAInfoagainstRequestId(_assetId);
-        if (_tokenIdNFT > 0) {
-            if (i_rwaNft.ownerOf(_tokenIdNFT) != msg.sender) {
+        if (_tokenIdNFT < 0) {
+            if (owner_ != msg.sender) {
                 revert LendingManager__InvalidToken();
             }
         }
@@ -244,7 +254,7 @@ contract LendingManager is ReentrancyGuard, Pausable, Ownable {
                 }
                 borrowings[i].isReturned = true;
                 i_rwaCoin.safeTransferFrom(msg.sender, address(this), _amount);
-                i_rwaCoin.safeTransfer(_lender, _amount + interestAmount);
+                // i_rwaCoin.safeTransfer(_lender, _amount + interestAmount);
                 i_nftVault.tokenTransferToBorrower(_tokenIdNFT, msg.sender);
                 i_lendingPool[_lender].amount += _amount + interestAmount;
                 borrowings[i].amount = 0; // Reset the amount to zero after return
@@ -266,6 +276,22 @@ contract LendingManager is ReentrancyGuard, Pausable, Ownable {
         emit coinReturned(msg.sender, _amount, _lender);
 
     }
+    function withdrawPartiallLendedCoin(Uint256 _amount) external{
+        _withdrawLendedCoin(_amount, msg.sender);
+
+    }
+    function withdrawtotalLendedCoin(_amount)external{
+          _withdrawLendedCoin(_amount, msg.sender);
+          for(uint256 i = 0; i < lendersArray.length; i++) {
+              if (lendersArray[i] == msg.sender) {
+                  lendersArray[i] = lendersArray[lendersArray.length - 1];
+                  lendersArray.pop();
+                  break;
+              }
+          }
+    }
+
+
     function changeMinBorrowCapacity(
         address _lender,
         uint256 _newCapacity
@@ -328,11 +354,10 @@ contract LendingManager is ReentrancyGuard, Pausable, Ownable {
         // Push to the user's borrow history array
         i_borrowingPoolArray[msg.sender].push(newBorrowing);
 
-        // Deposit the NFT into the NFT vault
         i_lendingPool[_lender].amount -= _amount;
         // Add the borrower address to the array if not already present
         bool exists = false;
-        for (uint256 i = 0; i < borroweraddressArray.length; i++)
+        for (uint256 i = 0; i < borroweraddressArray.length;)
         {
             if (borroweraddressArray[i] == msg.sender) {
                 exists = true;
@@ -342,7 +367,26 @@ contract LendingManager is ReentrancyGuard, Pausable, Ownable {
               if(!exists){
                     borroweraddressArray.push(msg.sender);
                 }
-   
+                unchecked{i++;}
+
+    }
+
+
+    function _withdrawLendedCoin(
+        uint256 _amount,
+        address _lender
+    ) private nonReentrant whenNotPaused onlyValidAddress(msg.sender) {
+        if (_amount <= 0) {
+            revert LendingManager__NotZeroAmount();
+        }
+        if (_lender == address(0)) {
+            revert LendingManager__InvalidAddress();
+        }
+        if (i_lendingPool[_lender].amount < _amount) {
+            revert LendingManager__InsufficientBalance();
+        }
+        i_rwaCoin.safeTransfer(msg.sender, _amount);
+        i_lendingPool[_lender].amount -= _amount;
     }
     function _calculateInterest(
         uint256 _amount,
@@ -360,4 +404,27 @@ contract LendingManager is ReentrancyGuard, Pausable, Ownable {
         // i_borrowingPool[msg.sender].amount += interestAmount;
         return interestAmount;
     }
+    function getLendingInfo(address _lender) external view returns (LendingInfo memory) {
+        return i_lendingPool[_lender];
+    }
+
+    function getCompleteLendingPool() external view returns (LendingInfo[] memory) {
+        LendingInfo[] memory lendingInfos = new LendingInfo[](lendersArray.length);
+        
+        for (uint256 i = 0; i < lendersArray.length; i++) {
+            lendingInfos[i] = i_lendingPool[lendersArray[i]];
+        }
+        
+        return lendingInfos;
+    }
+    function getborrowingInfo(address _borrower) external view returns (BorrowingInfo[] memory) {
+        return i_borrowingPoolArray[_borrower];
+    }
+    function getMinReturnPeriod() external view returns (uint256) {
+        return minReturnPeriod;
+    }
+    
+    
+
+
 }

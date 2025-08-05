@@ -26,13 +26,13 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IERC721Receiver} from "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
-contract AuctionHouse is IERC721Receiver,Ownable{
+contract AuctionHouse is IERC721Receiver, Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
     IERC721 private immutable i_rwaNFT;
-
 
     error AuctionHouse__NotZeroAddress();
     error AuctionHouse__TokenDoesNotExist();
@@ -77,11 +77,17 @@ contract AuctionHouse is IERC721Receiver,Ownable{
         uint256 winningBid
     );
 
-    constructor(address rwaNFT,address rwaCoin,uint256 _duration,address owner,uint256 _defaultPrice) Ownable(owner) {
+    constructor(
+        address rwaNFT,
+        address rwaCoin,
+        uint256 _duration,
+        address owner,
+        uint256 _defaultPrice
+    ) Ownable(owner) {
         if (rwaCoin == address(0)) {
             revert AuctionHouse__NotZeroAddress();
         }
-        if( _duration == 0) {
+        if (_duration == 0) {
             revert AuctionHouse__NotZeroAmount();
         }
         if (defaultPrice == 0) {
@@ -91,11 +97,10 @@ contract AuctionHouse is IERC721Receiver,Ownable{
         i_rwaNFT = IERC721(rwaNFT);
         auctionDuration = _duration;
         defaultPrice = _defaultPrice;
-
     }
 
     modifier notZeroAmount(uint256 amount) {
-       if(amount == 0) {
+        if (amount == 0) {
             revert AuctionHouse__NotZeroAmount();
         }
         _;
@@ -106,50 +111,69 @@ contract AuctionHouse is IERC721Receiver,Ownable{
         }
         _;
     }
-    function setAuctionDuration(uint256 duration) external onlyOwner notZeroAmount(duration) {
+    function setAuctionDuration(
+        uint256 duration
+    ) external onlyOwner notZeroAmount(duration) {
         auctionDuration = duration;
-    }   
-    function setDefaultPrice(uint256 price) external onlyOwner notZeroAmount(price) {
+    }
+    function setDefaultPrice(
+        uint256 price
+    ) external onlyOwner notZeroAmount(price) {
         defaultPrice = price;
     }
 
-
-    function bidOnNFT(uint256 tokenId, uint256 bidAmount) external notZeroAmount(bidAmount) notZeroAddress(msg.sender) {
+    function bidOnNFT(
+        uint256 tokenId,
+        uint256 bidAmount
+    )
+        external
+        notZeroAmount(bidAmount)
+        notZeroAddress(msg.sender)
+        nonReentrant
+    {
         Auction storage auction = auctions[tokenId];
-     
-        if (bidAmount <= auction.highestBid && bidAmount < auction.startingPrice) {
+
+        if (
+            bidAmount <= auction.highestBid && bidAmount < auction.startingPrice
+        ) {
             revert AuctionHouse__BidHigherThanCurrentHighest();
         }
         if (block.timestamp > auction.endTime) {
             revert AuctionHouse__InvalidAuction();
         }
 
-        // Refund the previous highest bidder
-        if (auction.highestBidder != address(0)) {
-            i_rwaCoin.safeTransfer(auction.highestBidder, auction.highestBid);
-  
-        }
-        // Transfer the bid amount from the bidder to the auction house
-        i_rwaCoin.safeTransferFrom(msg.sender, address(this), bidAmount);
+        address previousBidder = auction.highestBidder;
+        uint256 previousBid = auction.highestBid;
 
         auction.highestBid = bidAmount;
         auction.highestBidder = msg.sender;
+
+        // INTERACTIONS (external calls last)
+        // Transfer the bid amount from the bidder first
+        i_rwaCoin.safeTransferFrom(msg.sender, address(this), bidAmount);
+
+        // Refund the previous highest bidder
+        if (previousBidder != address(0) && previousBidder != address(this)) {
+            i_rwaCoin.safeTransfer(previousBidder, previousBid);
+        }
         emit BidPlaced(tokenId, msg.sender, bidAmount);
-       
     }
-        //function to declare. winner of auction can be checked manually or it will be called by chainlink automation
+    //function to declare. winner of auction can be checked manually or it will be called by chainlink automation
 
-
-    function endAuction(uint256 tokenId) external  {
+    function endAuction(uint256 tokenId) external nonReentrant {
         Auction storage auction = auctions[tokenId];
-      
+
         if (block.timestamp < auction.endTime) {
             revert AuctionHouse__AuctionStillGoingOn();
         }
 
         // Transfer the NFT to the highest bidder
         if (auction.highestBidder != address(0)) {
-            i_rwaNFT.safeTransferFrom(address(this), auction.highestBidder, tokenId);
+            i_rwaNFT.safeTransferFrom(
+                address(this),
+                auction.highestBidder,
+                tokenId
+            );
             delete auctions[tokenId];
             emit AuctionHouse__AuctionEndedWinnerAnnounced(
                 tokenId,
@@ -157,14 +181,14 @@ contract AuctionHouse is IERC721Receiver,Ownable{
                 auction.highestBid
             );
         } else {
-            if(auction.highestBid == auction.startingPrice) {
-               delete auctions[tokenId];  
-               emit AuctionHouse__AuctionEndedWinnerAnnounced(
+            if (auction.highestBid == auction.startingPrice) {
+                delete auctions[tokenId];
+                emit AuctionHouse__AuctionEndedWinnerAnnounced(
                     tokenId,
                     address(this),
                     auction.startingPrice
-                );}
-            
+                );
+            }
         }
     }
 
@@ -172,7 +196,6 @@ contract AuctionHouse is IERC721Receiver,Ownable{
         uint256 tokenId,
         uint256 startingPrice
     ) internal notZeroAmount(startingPrice) notZeroAddress(msg.sender) {
-      
         auctions[tokenId] = Auction({
             tokenId: tokenId,
             startingPrice: startingPrice,
@@ -194,7 +217,6 @@ contract AuctionHouse is IERC721Receiver,Ownable{
         uint256 tokenId,
         bytes calldata data
     ) external override returns (bytes4) {
-      
         if (data.length > 0) {
             // If data is provided, it can be used to set the starting price or other auction parameters
             uint256 startingPrice = abi.decode(data, (uint256));
