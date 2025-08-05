@@ -187,7 +187,7 @@ contract LendingManager is ReentrancyGuard, Pausable, Ownable {
             uint256 valueInUSD_,
             address owner_,
             bool tradable_
-        ) = i_rwaManager.s_userRWAInfoagainstRequestId(_assetId);
+        ) = i_rwaManager.getUserRWAInfoagainstRequestId(_assetId);
         if (_tokenIdNFT > 0) {
             if (i_rwaNft.ownerOf(_tokenIdNFT) != msg.sender) {
                 revert LendingManager__InvalidToken();
@@ -265,6 +265,16 @@ contract LendingManager is ReentrancyGuard, Pausable, Ownable {
         }
         emit coinReturned(msg.sender, _amount, _lender);
 
+    }
+    function changeMinBorrowCapacity(
+        address _lender,
+        uint256 _newCapacity
+    ) external onlyOwner {
+        if (_newCapacity <= 0) {
+            revert LendingManager__MinBorrowCantBeZero();
+        }
+         i_nftVault.changeMinBorrowCapacity(_lender, _newCapacity);
+        i_lendingPool[_lender].minBorrow = _newCapacity;
     }
     // this function will be called by chainlink automation on fixed interval
 

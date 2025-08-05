@@ -129,12 +129,16 @@ contract RWA_VerifiedAssets is Ownable,AccessControl{
     function upDateAssetValue(
         address owner,
         uint256 assetId,
-        uint256 newValueInUSD
+        uint256 newValueInUSD,
+        bool isLocked,
+        bool tradable
     ) external onlyMember {
         RWA_Types.RWA_Info[] storage assets = verifiedAssets[owner];
         for (uint256 i = 0; i < assets.length; i++) {
             if (assets[i].assetId == assetId) {
                 assets[i].valueInUSD = newValueInUSD;
+                assets[i].isLocked = isLocked;
+                assets[i].tradable = tradable;
                 break;
             }
         }

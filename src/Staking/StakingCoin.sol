@@ -25,6 +25,7 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {RWA_Coins} from "../CoinMintingAndManaging/RWA_Coins.sol";
 
 pragma solidity ^0.8.20;
 
@@ -34,6 +35,8 @@ pragma solidity ^0.8.20;
     @notice when deployed, its being 10^6(1mil) coin will be minted to the contract address for rewarding stake holders.
     @notice The contract allows users to stake coins, and it checks for valid addresses and non-zero amounts.
     @notice The contract is designed to be used with a specific token, which is passed during deployment.
+    @Important: Add contract address of RWA_Coins in constructor to mint coins to this contract address as a Minter.
+    @Improvement uppdate stalePeriod Logic so that user dont get charge for withdrawing coins they staked before lock period.
 
     */
 
@@ -59,7 +62,7 @@ contract StakingCoin is ReentrancyGuard, Ownable, Pausable {
     uint256 private totalCoinStakedInContract;
     // user should not withdraw coin before lock period else he will be fined
     uint256 private lockPeriod; 
-    uint256 private minFine;
+    uint16 private minFine;
 
     // Storing stake info against user address
     mapping(address => stakeInfo) private stakes;
@@ -69,7 +72,7 @@ contract StakingCoin is ReentrancyGuard, Ownable, Pausable {
         address indexed tokenAddress,
         uint256 amount
     );
-    event CoinWithdrawen(address indexed by, uint256 indexed amount);
+    event CoinWithdrawn(address indexed by, uint256 indexed amount);
     event RewardClaimed(address indexed by, uint256 indexed amount);
 
     //Modifiers
@@ -96,7 +99,7 @@ contract StakingCoin is ReentrancyGuard, Ownable, Pausable {
         uint256 _totalCoinStakedInContract,
         uint256 _rewardReward,
         uint256 _lockPeriod,
-        uint256 _minFine
+        uint16 _minFine
     ) Ownable(msg.sender) {
         RWA_CoinsAddress = _rwaCoinToken;
         rwaCoin = IERC20(_rwaCoinToken);
@@ -104,6 +107,8 @@ contract StakingCoin is ReentrancyGuard, Ownable, Pausable {
         rewardRate = _rewardReward;
         lockPeriod = _lockPeriod;
         minFine=_minFine;
+        // Minting initial coins to the contract address
+        RWA_Coins(RWA_CoinsAddress).mint(address(this), _totalCoinStakedInContract);
     }
     function setRewardRate(uint256 newRate) external onlyOwner {
         rewardRate = newRate;
@@ -120,7 +125,7 @@ contract StakingCoin is ReentrancyGuard, Ownable, Pausable {
     function unpause() external onlyOwner {
         _unpause();
     }
-    function setMinFine(uint256 _minFine) external onlyOwner{
+    function setMinFine(uint16 _minFine) external onlyOwner{
            minFine=_minFine;
     }
 
@@ -149,11 +154,12 @@ contract StakingCoin is ReentrancyGuard, Ownable, Pausable {
         stakes[msg.sender].amount = stakes[msg.sender].amount + _amount;
         totalCoinStakedInContract += _amount;
     }
+
     function withdrawCoin(uint256 _amount) external nonReentrant whenNotPaused {
         if (_amount > stakes[msg.sender].amount) {
             revert StakingCoin__InsufficientBalance();
         }
-        bool fine = _stalePeriod();
+         bool fine = _stalePeriod();
          uint256 totalDeduction=_amount;
 
         if (fine) {
@@ -173,10 +179,10 @@ contract StakingCoin is ReentrancyGuard, Ownable, Pausable {
 
         }
 
-        rwaCoin.safeTransfer(msg.sender, _amount);
+        rwaCoin.safeTransfer(msg.sender, totalDeduction);
 
-        emit CoinWithdrawen(msg.sender, _amount);
-       
+        emit CoinWithdrawn(msg.sender, totalDeduction);
+
         stakes[msg.sender].amount = stakes[msg.sender].amount - totalDeduction;
 
         totalCoinStakedInContract -= totalDeduction;

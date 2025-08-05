@@ -37,8 +37,8 @@ import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {IERC721Receiver} from "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
-
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
+
  contract NFTVault is Pausable, Ownable, ReentrancyGuard,IERC721Receiver{
     error NFTVault__NotZeroAddress();
     error NFTVault__TokenDoesNotExist();

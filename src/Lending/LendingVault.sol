@@ -32,7 +32,7 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
 /* 
     @title LendingVault
     @author Ashutosh Kumar
-    @notice This contract is used to lend coins to users, it allows users to deposit erc-20 coins, borrow coins, withdraw coins and return borrowed coins.
+    @notice This contract is used to lend coins to users, it allows users to deposit erc-20 coins, borrow coins, withdraw coins and return borrowed coins controlled by lending manager.
     @notice The contract is designed to be used with a specific token, which is passed during deployment.
     @dev This contract is pausable and can be paused by the owner.
     @dev This contract is protected by OpenZeppelin's ReentrancyGuard to prevent reentrancy attacks.

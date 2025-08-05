@@ -21,7 +21,7 @@
 // private
 // view & pure functions
 
-//Temp comments:- while making any nft stakable or lendable just check if its locked or not if locked dont allow to use it on any other defi protocol like lending and staking
+//Temp comments:- while making any nft stakable or lendable just check if its locked/tradable or not if locked dont allow to use it on any other defi protocol like lending and staking
 
 /* 
 @title RWA Manager
@@ -233,13 +233,14 @@ contract RWA_Manager is Ownable, ReentrancyGuard, IERC721Receiver, AccessControl
         uint256 _valueInUSD
     ) external nonReentrant onlyMember {
          (
+           ,
+          ,
             ,
-            ,
-            ,
-            ,
-            ,
+            bool isLocked_,
+          , // Not needed here as we are checking it in the contract
             uint256 valueInUSD_,
             ,
+            bool tradable
 
         ) = i_rwaVA.verifiedAssets(_to, _requestId);
         if(valueInUSD_ ==s_userRWAInfoagainstRequestId[_requestId].valueInUSD ){
@@ -251,28 +252,37 @@ contract RWA_Manager is Ownable, ReentrancyGuard, IERC721Receiver, AccessControl
         if (_valueInUSD <= 0) {
             revert RWA_Manager__AssetValueNotPositive();
         }
+        uint256 difference = 0;
    
         if (valueInUSD_<= _valueInUSD) {
-            uint256 difference = _valueInUSD - s_userAssets[msg.sender][_requestId]
+            difference = _valueInUSD - s_userAssets[msg.sender][_requestId]
                 .valueInUSD;
-            _mintCoins(msg.sender, difference);
-            s_userRWAInfoagainstRequestId[_requestId].valueInUSD = _valueInUSD;
-            s_userAssets[msg.sender][_requestId].valueInUSD = _valueInUSD;
+             _mintCoins(_to, difference);
+             s_userRWAInfoagainstRequestId[_requestId].valueInUSD = _valueInUSD;
+             s_userAssets[msg.sender][_requestId].valueInUSD = _valueInUSD;
+             i_rwaVA.upDateAssetValue(_to, _requestId, _valueInUSD, isLocked_, tradable);
         }
 
 
         if (valueInUSD_ > _valueInUSD) {
 
-            uint256 difference = s_userAssets[msg.sender][_requestId]
+            difference = s_userAssets[msg.sender][_requestId]
                 .valueInUSD - _valueInUSD;
             if (difference > i_rwaC.balanceOf(msg.sender)) {
+                
                 s_userAssets[msg.sender][_requestId].tradable = false;
                 s_userAssets[msg.sender][_requestId].isLocked = true;
+                s_userRWAInfoagainstRequestId[_requestId].tradable = false;
+                s_userRWAInfoagainstRequestId[_requestId].isLocked = true;
+                s_userRWAInfoagainstRequestId[_requestId].valueInUSD = _valueInUSD;
+                s_userAssets[msg.sender][_requestId].valueInUSD = _valueInUSD;
+                // Update the asset value in the verified assets contract
+                i_rwaVA.upDateAssetValue(_to, _requestId, _valueInUSD, false, true);
                 revert RWA_Manager__BalanceMustBeGreaterThanBurnAmount();
             }
-            _burnCoins(difference);
-            i_rwaVA.upDateAssetValue(_to, _requestId, _valueInUSD);
+           
         }
+        
     }
     /*
     @param _requestId The request ID of the asset to be updated.
@@ -384,10 +394,30 @@ contract RWA_Manager is Ownable, ReentrancyGuard, IERC721Receiver, AccessControl
     ) external view returns (RWA_Types.RWA_Info memory) {
         return s_userRWAInfoagainstRequestId[_requestId];
     }
+    
     function checkIfAssetIsTradable(
         address _user,
         uint256 _requestId
     ) external view returns (bool) {
         return s_userAssets[_user][_requestId].tradable;
     }
+      // Implement this function if missing
+function getUserRWAInfoagainstRequestId(uint256 assetId) external view  returns (
+    uint256, uint256, uint256, uint256, uint256, uint256, address, bool
+) {
+    return (
+        uint256(s_userRWAInfoagainstRequestId[assetId].assetType),
+        uint256(uint160(bytes20(bytes(s_userRWAInfoagainstRequestId[assetId].assetName)))),
+        s_userRWAInfoagainstRequestId[assetId].assetId,
+        s_userRWAInfoagainstRequestId[assetId].valueInUSD,
+        s_userRWAInfoagainstRequestId[assetId].isLocked ? 1 : 0,
+        s_userRWAInfoagainstRequestId[assetId].tradable ? 1 : 0,
+        s_userRWAInfoagainstRequestId[assetId].owner,
+        s_userRWAInfoagainstRequestId[assetId].isVerified
+    );
+}
+    
+
+
+    
 }
