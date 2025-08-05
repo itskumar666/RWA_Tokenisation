@@ -1,0 +1,21 @@
+{
+  "name": "zenith",
+  "version": "1.0.0",
+  "description": "<p align=\"center\">   <img src=\"https://raw.githubusercontent.com/itskumar666/RWA_Tokenisation/main/assets/banner.png\" alt=\"Decentralized Bank on Ethereum\" width=\"600\"/> </p>",
+  "main": "index.js",
+  "directories": {
+    "lib": "lib",
+    "test": "test"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@chainlink/functions-toolkit": "^0.3.2",
+    "dotenv": "^17.2.0",
+    "ethers": "^6.15.0"
+  }
+}

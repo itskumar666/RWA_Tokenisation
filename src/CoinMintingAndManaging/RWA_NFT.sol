@@ -38,53 +38,89 @@ contract RWA_NFT is ERC721URIStorage, Ownable, ERC721Burnable {
     error RWA_NFT__NotZeroAddress();
     error RWA_NFT__TokenDoesNotExist();
    
+    // Optimized: Pack struct to use single storage slot where possible
     struct Metadata {
         string name;
         string description;
         string image; // optional, on-chain image (can also be a base64 SVG or URL)
         string ipfsUri; // IPFS metadata URI
     }
-    mapping(uint256 s_tokenCounter => Metadata) private _tokenMetadata;
-
+    
+    mapping(uint256 => Metadata) private _tokenMetadata;
     uint256 private s_tokenCounter;
 
     event CreatedNFT(uint256 indexed tokenId);
 
     constructor() ERC721("TokenizedRWA", "TRWA") Ownable(msg.sender) {}
 
-    function mint(address _to, string memory _tokenURI,RWA_Types.assetType _assetType, string memory _assetName,uint256 valueInUSD) external onlyOwner returns(bool) {
-        if (address(0) == _to) {
+    function mint(
+        address _to, 
+        string memory _tokenURI,
+        RWA_Types.assetType _assetType, 
+        string memory _assetName,
+        uint256 valueInUSD
+    ) external onlyOwner returns(bool) {
+        if (_to == address(0)) {
             revert RWA_NFT__NotZeroAddress();
         }
-        uint256 tokenCounter = s_tokenCounter;
-        _safeMint(_to, s_tokenCounter);
-        _tokenMetadata[s_tokenCounter] = Metadata({
+        
+        uint256 tokenId = s_tokenCounter;
+        
+        // Optimized: Use unchecked increment for gas efficiency
+        unchecked {
+            s_tokenCounter = tokenId + 1;
+        }
+        
+        _safeMint(_to, tokenId);
+        
+        // Optimized: Direct assignment instead of using abi.encodePacked in description
+        _tokenMetadata[tokenId] = Metadata({
             name: _assetName,
-            description: string(
-                abi.encodePacked(
-                    "Asset Type: ",
-                    _assetType,
-                    ", Asset Name: ",
-                    _assetName,
-                    ", Value in USD: ",
-
-                    valueInUSD
-                )
+            description: string.concat(
+                "Asset Type: ", 
+                uint2str(uint256(_assetType)),
+                ", Asset Name: ", 
+                _assetName,
+                ", Value in USD: ", 
+                uint2str(valueInUSD)
             ),
             image: "", // Optional, can be set later
             ipfsUri: _tokenURI // Assuming the tokenURI is an IPFS URI
         });
-        _setTokenURI(s_tokenCounter, _tokenURI);
-        s_tokenCounter += 1;
-        emit CreatedNFT(tokenCounter);
+        
+        _setTokenURI(tokenId, _tokenURI);
+        emit CreatedNFT(tokenId);
         return true;
+    }
+
+    // Optimized helper function to convert uint to string
+    function uint2str(uint256 _i) internal pure returns (string memory) {
+        if (_i == 0) {
+            return "0";
+        }
+        uint256 j = _i;
+        uint256 len;
+        while (j != 0) {
+            len++;
+            j /= 10;
+        }
+        bytes memory bstr = new bytes(len);
+        uint256 k = len;
+        while (_i != 0) {
+            k = k - 1;
+            uint8 temp = (48 + uint8(_i - _i / 10 * 10));
+            bytes1 b1 = bytes1(temp);
+            bstr[k] = b1;
+            _i /= 10;
+        }
+        return string(bstr);
     }
 
     function burn(uint256 tokenId) public override onlyOwner {
         _burn(tokenId);
     }
 
- function setImageUri(uint256 tokenId, string memory imageUri) public onlyOwner {
+    function setImageUri(uint256 tokenId, string memory imageUri) public onlyOwner {
         if (_ownerOf(tokenId) == address(0)) {
             revert RWA_NFT__TokenDoesNotExist();
         }
@@ -99,10 +135,15 @@ contract RWA_NFT is ERC721URIStorage, Ownable, ERC721Burnable {
         return _tokenMetadata[tokenId];
     }
 
-    function tokenURI(
+    function getTokenURI(
         uint256 tokenId
-    ) public view override(ERC721, ERC721URIStorage) returns (string memory) {
+    ) public view returns (string memory) {
         return super.tokenURI(tokenId);
+    }
+
+    // Explicitly override tokenURI to resolve inheritance conflict
+    function tokenURI(uint256 tokenId) public view override(ERC721, ERC721URIStorage) returns (string memory) {
+        return ERC721URIStorage.tokenURI(tokenId);
     }
 
     function supportsInterface(

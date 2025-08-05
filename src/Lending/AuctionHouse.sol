@@ -29,7 +29,7 @@ import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
-contract auctionHouse is IERC721Receiver,Ownable{
+contract AuctionHouse is IERC721Receiver,Ownable{
     using SafeERC20 for IERC20;
     IERC721 private immutable i_rwaNFT;
 

@@ -7,14 +7,14 @@ import {RWA_Manager} from "../../src/CoinMintingAndManaging/RWA_Manager.sol";
 contract Deploy_RWAManager is Script {
     function run() external {
         uint256 deployerKey = vm.envUint("PRIVATE_KEY"); // from .env
-        address rwaVerification = vm.envAddress("RWA_VERIFICATION_ADDRESS");
+        address rwaVA = vm.envAddress("RWA_VERIFIED_ASSETS_ADDRESS");
         address rwaNFT = vm.envAddress("RWA_NFT_ADDRESS");
         address rwaCoins = vm.envAddress("RWA_COINS_ADDRESS");
 
         vm.startBroadcast(deployerKey);
 
         RWA_Manager rwaManager = new RWA_Manager(
-            rwaVerification,
+            rwaVA,
             rwaNFT,
             rwaCoins
         );

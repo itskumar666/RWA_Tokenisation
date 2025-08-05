@@ -21,12 +21,14 @@
 // private
 // view & pure functions
 
+//Temp comments:- while making any nft stakable or lendable just check if its locked or not if locked dont allow to use it on any other defi protocol like lending and staking
+
 /* 
 @title RWA Manager
 @Author Ashutosh Kumar
 @Notice its the first contract where you submit your asset to mint NFT and coins and also burn nft & coins.
 @Notice asset can be withdrawn by submitting minted nft and coins.
-@DEV any dev looking for improvement can implement these things to make code more modular and secure.
+@DEV any dev looking for improvement can implement these things to make code and secure.
 @DEV it is highly inefficient can a lot of improvement can be made, like making code modular for depositing & withdrawing nft and coins(internal). and also fix  updating two mappings.
 @DEV and also it can be made more secure by adding Pausable and ownable contract from openzeppelin;
 @DEV instead of importing contracts we can use their interfaces.
@@ -37,14 +39,17 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
 import {IERC721Receiver} from "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 
-import {RWA_Verification} from "./RWA_Verification.sol";
+// import {RWA_Verification} from "./RWA_Verification.sol";
+import {RWA_VerifiedAssets} from "./RWA_VerifiedAssets.sol";
 import {RWA_NFT} from "./RWA_NFT.sol";
 import {RWA_Coins} from "./RWA_Coins.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {RWA_Types} from "./RWA_Types.sol";
-contract RWA_Manager is Ownable, ReentrancyGuard, IERC721Receiver {
+contract RWA_Manager is Ownable, ReentrancyGuard, IERC721Receiver, AccessControl {
     using SafeERC20 for IERC20;
+    
 
     error RWA_Manager__AssetNotVerified();
     error RWA_Manager__AssetValueNotPositive();
@@ -52,8 +57,12 @@ contract RWA_Manager is Ownable, ReentrancyGuard, IERC721Receiver {
     error RWA_Manager__NotOwnerOfAsset();
     error RWA_NFT__NFTMIntingFailed();
     error RWA_Manager__NFTValueIsMoreThanSubmittedToken();
+    error RWA_Manager__TokenAlreadyMinted();
+    error RWA_Manager__ValueNotUpdatedFromVerifiedAssetsContract();
 
-    RWA_Verification private immutable i_rwaV;
+    // RWA_Verification private immutable i_rwaV;
+    bytes32 public constant MEMBER_ROLE = keccak256("MEMBER_ROLE");
+    RWA_VerifiedAssets private immutable i_rwaVA;
     RWA_NFT private immutable i_rwaN;
     RWA_Coins private immutable i_rwaC;
     uint256 private valueOfToken;
@@ -64,22 +73,50 @@ contract RWA_Manager is Ownable, ReentrancyGuard, IERC721Receiver {
         public s_userAssets;
 
     event TokenTradable(uint256 indexed tokenId);
+    event NFTReceived(
+        address indexed operator,
+        address indexed from,
+        uint256 indexed tokenId,
+        bytes data
+    );
+
+    modifier onlyMember() {
+        require(hasRole(MEMBER_ROLE, msg.sender), "Caller is not a member");
+        _;
+    }
 
     constructor(
-        address _rwaV,
+        // address _rwaV,
+        address _rwaVA,
         address _rwaN,
         address _rwaC
     ) Ownable(msg.sender) {
-        i_rwaV = RWA_Verification(_rwaV);
-        i_rwaN = RWA_NFT(_rwaN);
+        // i_rwaV = RWA_Verification(_rwaV);
+        i_rwaVA = RWA_VerifiedAssets(_rwaVA);
         i_rwaC = RWA_Coins(_rwaC);
+        _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
+        _grantRole(MEMBER_ROLE, msg.sender);
+
+
+    }
+    function setNewMember(
+        address _newMember
+    ) external onlyOwner {
+        _grantRole(MEMBER_ROLE, _newMember);
+    }
+    function removeMember(
+        address _member
+    ) external onlyOwner {
+        _revokeRole(MEMBER_ROLE, _member);
     }
     function onERC721Received(
         address operator,
         address from,
         uint256 tokenId,
         bytes calldata data
-    ) external pure override returns (bytes4) {
+    ) external override returns (bytes4) {
+        emit NFTReceived(operator, from, tokenId, data);
+
         return IERC721Receiver.onERC721Received.selector;
     }
 
@@ -91,6 +128,7 @@ contract RWA_Manager is Ownable, ReentrancyGuard, IERC721Receiver {
     // They are used to deposit RWA and mint NFT.
     // The depositRWAAndMintNFT function is used to deposit RWA and mint NFT.
     // It takes the address of the user, the request ID, and the token URI as parameters.
+    // ******* before calling this function make sure that the asset is verified by RWA_VerifiedAssets contract *************
     function depositRWAAndMintNFT(
         address _to,
         uint256 _requestId,
@@ -105,7 +143,12 @@ contract RWA_Manager is Ownable, ReentrancyGuard, IERC721Receiver {
             uint256 valueInUSD_,
             ,
 
-        ) = i_rwaV.s_requestResponsesData(_requestId);
+        ) = i_rwaVA.verifiedAssets(_to, _requestId);
+        if (s_userRWAInfoagainstRequestId[_requestId].assetId != 0) {
+            // Check if the asset is already verified
+            // If it is, revert the transaction
+            revert RWA_Manager__TokenAlreadyMinted();
+        }
         if (!isVerified) {
             revert RWA_Manager__AssetNotVerified();
         }
@@ -113,13 +156,13 @@ contract RWA_Manager is Ownable, ReentrancyGuard, IERC721Receiver {
             revert RWA_Manager__AssetValueNotPositive();
         }
         _mintNFT(_to, tokenURI, assetType_, assetName_, assetId_, valueInUSD_);
-        
+
         _mintCoins(_to, valueInUSD_);
         s_userAssets[_to][_requestId] = RWA_Types.RWA_Info({
             assetType: assetType_,
             assetName: assetName_,
             assetId: assetId_,
-            isLocked: isLocked_,
+            isLocked: isLocked_, // Because the asset is being deposited and minted
             isVerified: isVerified,
             valueInUSD: valueInUSD_,
             owner: msg.sender,
@@ -128,21 +171,25 @@ contract RWA_Manager is Ownable, ReentrancyGuard, IERC721Receiver {
     }
 
     // submit all coins minted against this token to make token tradable on lending platform
+    //Because if he have NFT and coins then he will have double value for same assets that is why burning Coins is important
 
-        function changeNftTradable( uint256 tokenId,
-        uint256 _requestId,uint256 _tokenAmount)external{
-            if(_tokenAmount<s_userRWAInfoagainstRequestId[_requestId].valueInUSD){
-                revert RWA_Manager__NFTValueIsMoreThanSubmittedToken();
-            }
-           _burnCoins(s_userAssets[msg.sender][_requestId].valueInUSD);
-           // inefficient updating two mappings could have merged in one
-           // Improve in future version
-           s_userRWAInfoagainstRequestId[_requestId].tradable=true;
-           s_userAssets[msg.sender][_requestId].tradable=true;
-           emit TokenTradable(tokenId);
-
+    function changeNftTradable(
+        uint256 tokenId,
+        uint256 _requestId,
+        uint256 _tokenAmount
+    ) external {
+        if (
+            _tokenAmount < s_userRWAInfoagainstRequestId[_requestId].valueInUSD
+        ) {
+            revert RWA_Manager__NFTValueIsMoreThanSubmittedToken();
         }
-
+        _burnCoins(s_userAssets[msg.sender][_requestId].valueInUSD);
+        // inefficient updating two mappings could have merged in one
+        // Improve in future version
+        s_userRWAInfoagainstRequestId[_requestId].tradable = true;
+        s_userAssets[msg.sender][_requestId].tradable = true;
+        emit TokenTradable(tokenId);
+    }
 
     /* 
     @param tokenId The ID of the NFT to be burned.
@@ -151,11 +198,12 @@ contract RWA_Manager is Ownable, ReentrancyGuard, IERC721Receiver {
      check if the user have valid nft and coins
      If the user does not have a valid NFT or coins, revert the transaction.
      If the user has a valid NFT and coins, burn the NFT and coins.
+     ****** to completely remove from the system you have to deregistered asset from RWA_VerifiedAssets contract
     */
     function withdrawRWAAndBurnNFTandCoin(
         uint256 tokenId,
         uint256 _requestId
-    ) public nonReentrant {
+    ) external nonReentrant {
         if (s_userAssets[msg.sender][_requestId].assetId != _requestId) {
             revert RWA_Manager__AssetNotVerified();
         }
@@ -166,7 +214,6 @@ contract RWA_Manager is Ownable, ReentrancyGuard, IERC721Receiver {
             revert RWA_Manager__NotOwnerOfAsset();
         }
         valueOfToken = s_userRWAInfoagainstRequestId[_requestId].valueInUSD;
-
 
         _burnNFT(tokenId);
         _burnCoins(s_userAssets[msg.sender][_requestId].valueInUSD);
@@ -179,36 +226,52 @@ contract RWA_Manager is Ownable, ReentrancyGuard, IERC721Receiver {
     @param _requestId The request ID of the asset to be updated.
     @param _valueInUSD The new value of the asset in USD.
     @notice This function allows a user to update the value of an asset.
+    in forntend or backend you can call this function to update the value of an asset regularly.
     */
-    function updateAssetValue(
+    function updateAssetValue(address _to,
         uint256 _requestId,
         uint256 _valueInUSD
-    ) public nonReentrant {
-        if (s_userAssets[msg.sender][_requestId].assetId != _requestId) {
+    ) external nonReentrant onlyMember {
+         (
+            ,
+            ,
+            ,
+            ,
+            ,
+            uint256 valueInUSD_,
+            ,
+
+        ) = i_rwaVA.verifiedAssets(_to, _requestId);
+        if(valueInUSD_ ==s_userRWAInfoagainstRequestId[_requestId].valueInUSD ){
+            revert RWA_Manager__ValueNotUpdatedFromVerifiedAssetsContract();
+        }
+        if (s_userAssets[_to][_requestId].assetId != _requestId) {
             revert RWA_Manager__AssetNotVerified();
         }
         if (_valueInUSD <= 0) {
             revert RWA_Manager__AssetValueNotPositive();
         }
-        if (s_userAssets[msg.sender][_requestId].owner != msg.sender) {
-            revert RWA_Manager__NotOwnerOfAsset();
-        }
-        s_userAssets[msg.sender][_requestId].valueInUSD = _valueInUSD;
-        s_userRWAInfoagainstRequestId[_requestId].valueInUSD = _valueInUSD;
-        if (s_userAssets[msg.sender][_requestId].valueInUSD <= _valueInUSD) {
-            uint256 difference = s_userAssets[msg.sender][_requestId]
-                .valueInUSD - _valueInUSD;
+   
+        if (valueInUSD_<= _valueInUSD) {
+            uint256 difference = _valueInUSD - s_userAssets[msg.sender][_requestId]
+                .valueInUSD;
             _mintCoins(msg.sender, difference);
+            s_userRWAInfoagainstRequestId[_requestId].valueInUSD = _valueInUSD;
+            s_userAssets[msg.sender][_requestId].valueInUSD = _valueInUSD;
         }
-        s_userRWAInfoagainstRequestId[_requestId].valueInUSD = _valueInUSD;
-        if (s_userAssets[msg.sender][_requestId].valueInUSD > _valueInUSD) {
+
+
+        if (valueInUSD_ > _valueInUSD) {
+
             uint256 difference = s_userAssets[msg.sender][_requestId]
                 .valueInUSD - _valueInUSD;
             if (difference > i_rwaC.balanceOf(msg.sender)) {
                 s_userAssets[msg.sender][_requestId].tradable = false;
+                s_userAssets[msg.sender][_requestId].isLocked = true;
                 revert RWA_Manager__BalanceMustBeGreaterThanBurnAmount();
             }
             _burnCoins(difference);
+            i_rwaVA.upDateAssetValue(_to, _requestId, _valueInUSD);
         }
     }
     /*
@@ -236,25 +299,21 @@ contract RWA_Manager is Ownable, ReentrancyGuard, IERC721Receiver {
         i_rwaN.setImageUri(_tokenId, _imageUri);
     }
 
-    function mintCoinAgainstEth(
-        address _to
-        
-    ) external payable nonReentrant {
+    function mintCoinAgainstEth(address _to) external payable nonReentrant {
         if (msg.value <= 0) {
             revert RWA_Manager__AssetValueNotPositive();
         }
-       
+
         // Assuming 1 ETH = 1000 USD for simplicity, adjust as needed
-        // update it according to coin value in usd 
-        uint256 coinsToMint = (msg.value /1e18) ;
+        // update it according to coin value in usd
+        uint256 coinsToMint = (msg.value / 1e18);
         _mintCoins(_to, coinsToMint);
     }
     function withdraw(address payable _to, uint256 amount) external onlyOwner {
-    require(address(this).balance >= amount, "Insufficient balance");
-    (bool success, ) = _to.call{value: amount}("");
-    require(success, "Transfer failed");
-   }
-
+        require(address(this).balance >= amount, "Insufficient balance");
+        (bool success, ) = _to.call{value: amount}("");
+        require(success, "Transfer failed");
+    }
 
     //////////////////////////////
     /// Private Functions   //////////
@@ -274,7 +333,7 @@ contract RWA_Manager is Ownable, ReentrancyGuard, IERC721Receiver {
         uint256 valueInUSD_
     ) private {
         bool minted = i_rwaN.mint(
-            msg.sender,
+            _to,
             tokenURI,
             assetType_,
             assetName_,
@@ -309,7 +368,26 @@ contract RWA_Manager is Ownable, ReentrancyGuard, IERC721Receiver {
         i_rwaC.burn(amount);
     }
     function getContractEthBalance() external view returns (uint256) {
-    return address(this).balance;
-}
-
+        return address(this).balance;
+    }
+    function getContractCoinBalance() external view returns (uint256) {
+        return i_rwaC.balanceOf(address(this));
+    }
+    function getUserAssetInfo(
+        address _user,
+        uint256 _requestId
+    ) external view returns (RWA_Types.RWA_Info memory) {
+        return s_userAssets[_user][_requestId];
+    }
+    function getUserRWAInfo(
+        uint256 _requestId
+    ) external view returns (RWA_Types.RWA_Info memory) {
+        return s_userRWAInfoagainstRequestId[_requestId];
+    }
+    function checkIfAssetIsTradable(
+        address _user,
+        uint256 _requestId
+    ) external view returns (bool) {
+        return s_userAssets[_user][_requestId].tradable;
+    }
 }
