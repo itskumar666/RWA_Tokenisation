@@ -5,27 +5,31 @@ import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 
 contract RWA_CoinsMock is ERC20, Ownable {
-    error RWA_Coins__NotZeroAddress();
-    error RWA_Coins__InsufficientBalance();
+    mapping(address => bool) public minters;
     
-    constructor() ERC20("RWA_Coins", "RWAC") Ownable(msg.sender) {}
-    
-    function mint(address _to, uint256 _amount) external onlyOwner returns (bool) {
-        if (_to == address(0)) {
-            revert RWA_Coins__NotZeroAddress();
-        }
-        _mint(_to, _amount);
-        return true;
+    modifier onlyMinter() {
+        require(minters[msg.sender], "Not a minter");
+        _;
     }
     
-    function burn(uint256 _amount) external onlyOwner {
-        if (balanceOf(address(this)) < _amount) {
-            revert RWA_Coins__InsufficientBalance();
-        }
-        _burn(address(this), _amount);
+    constructor() ERC20("RWA Coin", "RWA") Ownable(msg.sender) {
+        minters[msg.sender] = true;
     }
     
-    // For testing purposes
+    function addMinter(address minter) external onlyOwner {
+        minters[minter] = true;
+    }
+    
+    function removeMinter(address minter) external onlyOwner {
+        minters[minter] = false;
+    }
+    
+    function mint(address to, uint256 amount) external {
+        // Allow anyone to mint for testing purposes - more permissive than real contract
+        _mint(to, amount);
+    }
+    
+    // For testing purposes - allow anyone to mint for flexibility
     function mintTo(address _to, uint256 _amount) external {
         _mint(_to, _amount);
     }

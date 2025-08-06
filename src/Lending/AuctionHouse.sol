@@ -38,8 +38,10 @@ contract AuctionHouse is IERC721Receiver, Ownable, ReentrancyGuard {
     error AuctionHouse__TokenDoesNotExist();
     error AuctionHouse__InvalidAuction();
     error AuctionHouse__NotZeroAmount();
-    error AuctionHouse__BidHigherThanCurrentHighest();
+    error AuctionHouse__BidTooLow();
     error AuctionHouse__AuctionStillGoingOn();
+    error AuctionHouse__AuctionAlreadyExists();
+    error AuctionHouse__AuctionNotFound();
     struct Auction {
         uint256 tokenId;
         uint256 startingPrice;
@@ -66,16 +68,18 @@ contract AuctionHouse is IERC721Receiver, Ownable, ReentrancyGuard {
         address indexed bidder,
         uint256 bidAmount
     );
-    event auctionCreated(
+    event AuctionCreated(
         uint256 indexed tokenId,
         uint256 startingPrice,
         uint256 endTime
     );
-    event AuctionHouse__AuctionEndedWinnerAnnounced(
+    event AuctionEnded(
         uint256 indexed tokenId,
         address indexed winner,
         uint256 winningBid
     );
+    event AuctionCancelled(uint256 indexed tokenId);
+    event EmergencyWithdraw(address indexed token, uint256 amount);
 
     constructor(
         address rwaNFT,
@@ -84,13 +88,16 @@ contract AuctionHouse is IERC721Receiver, Ownable, ReentrancyGuard {
         address owner,
         uint256 _defaultPrice
     ) Ownable(owner) {
+        if (rwaNFT == address(0)) {
+            revert AuctionHouse__NotZeroAddress();
+        }
         if (rwaCoin == address(0)) {
             revert AuctionHouse__NotZeroAddress();
         }
         if (_duration == 0) {
             revert AuctionHouse__NotZeroAmount();
         }
-        if (defaultPrice == 0) {
+        if (_defaultPrice == 0) {
             revert AuctionHouse__NotZeroAmount();
         }
         i_rwaCoin = IERC20(rwaCoin);
@@ -132,14 +139,20 @@ contract AuctionHouse is IERC721Receiver, Ownable, ReentrancyGuard {
         nonReentrant
     {
         Auction storage auction = auctions[tokenId];
-
-        if (
-            bidAmount <= auction.highestBid && bidAmount < auction.startingPrice
-        ) {
-            revert AuctionHouse__BidHigherThanCurrentHighest();
+        
+        // Check if auction exists
+        if (auction.tokenId == 0) {
+            revert AuctionHouse__AuctionNotFound();
         }
+        
+        // Check if auction is still active
         if (block.timestamp > auction.endTime) {
             revert AuctionHouse__InvalidAuction();
+        }
+
+        // Fixed: Correct bid validation logic
+        if (bidAmount <= auction.highestBid) {
+            revert AuctionHouse__BidTooLow();
         }
 
         address previousBidder = auction.highestBidder;
@@ -152,7 +165,7 @@ contract AuctionHouse is IERC721Receiver, Ownable, ReentrancyGuard {
         // Transfer the bid amount from the bidder first
         i_rwaCoin.safeTransferFrom(msg.sender, address(this), bidAmount);
 
-        // Refund the previous highest bidder
+        // Refund the previous highest bidder (excluding contract itself)
         if (previousBidder != address(0) && previousBidder != address(this)) {
             i_rwaCoin.safeTransfer(previousBidder, previousBid);
         }
@@ -162,40 +175,44 @@ contract AuctionHouse is IERC721Receiver, Ownable, ReentrancyGuard {
 
     function endAuction(uint256 tokenId) external nonReentrant {
         Auction storage auction = auctions[tokenId];
+        
+        // Check if auction exists
+        if (auction.tokenId == 0) {
+            revert AuctionHouse__AuctionNotFound();
+        }
 
+        // Check if auction has ended
         if (block.timestamp < auction.endTime) {
             revert AuctionHouse__AuctionStillGoingOn();
         }
 
-        // Transfer the NFT to the highest bidder
-        if (auction.highestBidder != address(0)) {
-            i_rwaNFT.safeTransferFrom(
-                address(this),
-                auction.highestBidder,
-                tokenId
-            );
-            delete auctions[tokenId];
-            emit AuctionHouse__AuctionEndedWinnerAnnounced(
-                tokenId,
-                auction.highestBidder,
-                auction.highestBid
-            );
+        address winner = auction.highestBidder;
+        uint256 winningBid = auction.highestBid;
+
+        // Clean up auction data
+        delete auctions[tokenId];
+        _removeTokenFromArray(tokenId);
+
+        // Transfer NFT to winner
+        if (winner != address(0) && winner != address(this)) {
+            i_rwaNFT.safeTransferFrom(address(this), winner, tokenId);
+            emit AuctionEnded(tokenId, winner, winningBid);
         } else {
-            if (auction.highestBid == auction.startingPrice) {
-                delete auctions[tokenId];
-                emit AuctionHouse__AuctionEndedWinnerAnnounced(
-                    tokenId,
-                    address(this),
-                    auction.startingPrice
-                );
-            }
+            // No valid bids, keep NFT in contract or handle as needed
+            // For now, we'll keep it in the contract
+            emit AuctionEnded(tokenId, address(this), 0);
         }
     }
 
     function _createAuction(
         uint256 tokenId,
         uint256 startingPrice
-    ) internal notZeroAmount(startingPrice) notZeroAddress(msg.sender) {
+    ) internal notZeroAmount(startingPrice) {
+        // Check if auction already exists
+        if (auctions[tokenId].tokenId != 0) {
+            revert AuctionHouse__AuctionAlreadyExists();
+        }
+        
         auctions[tokenId] = Auction({
             tokenId: tokenId,
             startingPrice: startingPrice,
@@ -203,12 +220,12 @@ contract AuctionHouse is IERC721Receiver, Ownable, ReentrancyGuard {
             highestBid: startingPrice,
             highestBidder: address(this)
         });
-        emit auctionCreated(
+        
+        emit AuctionCreated(
             tokenId,
             startingPrice,
             block.timestamp + auctionDuration
         );
-        emit NFTReceived(msg.sender, msg.sender, tokenId, "");
     }
 
     function onERC721Received(
@@ -217,17 +234,141 @@ contract AuctionHouse is IERC721Receiver, Ownable, ReentrancyGuard {
         uint256 tokenId,
         bytes calldata data
     ) external override returns (bytes4) {
+        uint256 startingPrice;
+        
         if (data.length > 0) {
-            // If data is provided, it can be used to set the starting price or other auction parameters
-            uint256 startingPrice = abi.decode(data, (uint256));
-            _createAuction(tokenId, startingPrice);
+            // If data is provided, decode the starting price
+            startingPrice = abi.decode(data, (uint256));
         } else {
-            // If no data is provided, create a default auction with a starting price of 0
-            _createAuction(tokenId, 100); // Default starting price
+            // Use default price if no data provided
+            startingPrice = defaultPrice;
         }
+        
+        _createAuction(tokenId, startingPrice);
         tokenIdsArray.push(tokenId);
         emit NFTReceived(operator, from, tokenId, data);
 
         return IERC721Receiver.onERC721Received.selector;
+    }
+    
+    // ========================================
+    // INTERNAL HELPER FUNCTIONS
+    // ========================================
+    
+    function _removeTokenFromArray(uint256 tokenId) internal {
+        for (uint256 i = 0; i < tokenIdsArray.length; i++) {
+            if (tokenIdsArray[i] == tokenId) {
+                tokenIdsArray[i] = tokenIdsArray[tokenIdsArray.length - 1];
+                tokenIdsArray.pop();
+                break;
+            }
+        }
+    }
+    
+    // ========================================
+    // VIEW FUNCTIONS
+    // ========================================
+    
+    function getAuction(uint256 tokenId) external view returns (Auction memory) {
+        return auctions[tokenId];
+    }
+    
+    function getActiveAuctions() external view returns (uint256[] memory) {
+        uint256[] memory activeTokens = new uint256[](tokenIdsArray.length);
+        uint256 count = 0;
+        
+        for (uint256 i = 0; i < tokenIdsArray.length; i++) {
+            uint256 tokenId = tokenIdsArray[i];
+            if (auctions[tokenId].tokenId != 0 && auctions[tokenId].endTime > block.timestamp) {
+                activeTokens[count] = tokenId;
+                count++;
+            }
+        }
+        
+        // Resize array to actual count
+        uint256[] memory result = new uint256[](count);
+        for (uint256 i = 0; i < count; i++) {
+            result[i] = activeTokens[i];
+        }
+        
+        return result;
+    }
+    
+    function getExpiredAuctions() external view returns (uint256[] memory) {
+        uint256[] memory expiredTokens = new uint256[](tokenIdsArray.length);
+        uint256 count = 0;
+        
+        for (uint256 i = 0; i < tokenIdsArray.length; i++) {
+            uint256 tokenId = tokenIdsArray[i];
+            if (auctions[tokenId].tokenId != 0 && auctions[tokenId].endTime <= block.timestamp) {
+                expiredTokens[count] = tokenId;
+                count++;
+            }
+        }
+        
+        // Resize array to actual count
+        uint256[] memory result = new uint256[](count);
+        for (uint256 i = 0; i < count; i++) {
+            result[i] = expiredTokens[i];
+        }
+        
+        return result;
+    }
+    
+    function getAuctionDuration() external view returns (uint256) {
+        return auctionDuration;
+    }
+    
+    function getDefaultPrice() external view returns (uint256) {
+        return defaultPrice;
+    }
+    
+    function getAllTokenIds() external view returns (uint256[] memory) {
+        return tokenIdsArray;
+    }
+    
+    function isAuctionActive(uint256 tokenId) external view returns (bool) {
+        Auction memory auction = auctions[tokenId];
+        return auction.tokenId != 0 && auction.endTime > block.timestamp;
+    }
+    
+    // ========================================
+    // EMERGENCY FUNCTIONS
+    // ========================================
+    
+    function cancelAuction(uint256 tokenId) external onlyOwner nonReentrant {
+        Auction storage auction = auctions[tokenId];
+        
+        if (auction.tokenId == 0) {
+            revert AuctionHouse__AuctionNotFound();
+        }
+        
+        address bidder = auction.highestBidder;
+        uint256 bidAmount = auction.highestBid;
+        
+        // Clean up auction
+        delete auctions[tokenId];
+        _removeTokenFromArray(tokenId);
+        
+        // Refund highest bidder if not the contract
+        if (bidder != address(0) && bidder != address(this)) {
+            i_rwaCoin.safeTransfer(bidder, bidAmount);
+        }
+        
+        // Return NFT to owner (contract owner in emergency)
+        i_rwaNFT.safeTransferFrom(address(this), owner(), tokenId);
+        
+        emit AuctionCancelled(tokenId);
+    }
+    
+    function emergencyWithdrawERC20(address token) external onlyOwner {
+        IERC20 tokenContract = IERC20(token);
+        uint256 balance = tokenContract.balanceOf(address(this));
+        tokenContract.safeTransfer(owner(), balance);
+        emit EmergencyWithdraw(token, balance);
+    }
+    
+    function emergencyWithdrawNFT(uint256 tokenId) external onlyOwner {
+        i_rwaNFT.safeTransferFrom(address(this), owner(), tokenId);
     }
 }

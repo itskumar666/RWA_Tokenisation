@@ -42,6 +42,9 @@ import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
  contract NFTVault is Pausable, Ownable, ReentrancyGuard,IERC721Receiver{
     error NFTVault__NotZeroAddress();
     error NFTVault__TokenDoesNotExist();
+    error NFTVault__InvalidAddress();
+    error NFTVault__TokenNotOwnedByUser();
+    error NFTVault__NFTTransferFailed();
     struct NFTInfo {
         uint256 tokenId;
         address owner;
@@ -58,22 +61,30 @@ import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
     event NFTTransferToAuctionHouse(address indexed user, uint256 indexed tokenId);
 
     constructor(address rwaNFT,address LendingManager) Ownable(LendingManager) {
-        
+        if (rwaNFT == address(0)) {
+            revert NFTVault__InvalidAddress();
+        }
+        if (LendingManager == address(0)) {
+            revert NFTVault__InvalidAddress(); 
+        }
         i_rwaNFT = IERC721(rwaNFT);
-
     }  
     
     
     function depositNFT(uint256 tokenId,address _borrower,uint256 _NFTValue) external nonReentrant whenNotPaused onlyOwner{
-        if (address(0) == msg.sender) {
-            revert NFTVault__NotZeroAddress();
+        if (_borrower == address(0)) {
+            revert NFTVault__InvalidAddress();
         }
-        //will be already checked by lending manager contract
-        // if (!i_rwaNFT.exists(tokenId)) {
-        //     revert NFTVault__TokenDoesNotExist();
-        // }
+        if (_NFTValue == 0) {
+            revert NFTVault__TokenDoesNotExist(); // Reusing error for zero value
+        }
+        if (s_tokenOwners[tokenId] != address(0)) {
+            revert NFTVault__TokenDoesNotExist(); // Token already exists in vault
+        }
         
-        // i_rwaNFT.safeTransferFrom(_borrower, address(this), tokenId);
+        // Actually transfer the NFT to the vault
+        i_rwaNFT.safeTransferFrom(_borrower, address(this), tokenId);
+        
         s_tokenOwners[tokenId] = _borrower;
 
         s_userNFTs[_borrower].push(NFTInfo({
@@ -84,79 +95,65 @@ import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 
         s_tokenValue[tokenId] = _NFTValue; // Store the value of the NFT
         
-        emit NFTDeposited(msg.sender, tokenId);
+        emit NFTDeposited(_borrower, tokenId);
     }
     function tokenTransferToBorrower(uint256 tokenId,address _borrower) external nonReentrant whenNotPaused onlyOwner {
-        if (address(0) == _borrower) {
-            revert NFTVault__NotZeroAddress();
+        if (_borrower == address(0)) {
+            revert NFTVault__InvalidAddress();
         }
         if (s_tokenOwners[tokenId] != _borrower) {
-            revert NFTVault__TokenDoesNotExist();
+            revert NFTVault__TokenNotOwnedByUser();
         }
         
         i_rwaNFT.safeTransferFrom(address(this), _borrower, tokenId);
-        delete s_tokenOwners[tokenId];
         
-        // Remove tokenId from user's list
-        NFTInfo[] storage userTokens = s_userNFTs[_borrower];
-        for (uint256 i = 0; i < userTokens.length; i++) {
-            if (userTokens[i].tokenId == tokenId) {
-                userTokens[i] = userTokens[userTokens.length - 1];
-                userTokens.pop();
-                break;
-            }
-        }
+        // Clean up state
+        _removeTokenFromUser(_borrower, tokenId);
+        delete s_tokenOwners[tokenId];
+        delete s_tokenValue[tokenId];
         
         emit NFTWithdrawn(_borrower, tokenId);
-    
     }
 
     function tokenTransferToLender(uint256 tokenId,address _lender,address _borrower) external nonReentrant whenNotPaused onlyOwner {
-        if (address(0) == _lender) {
-            revert NFTVault__NotZeroAddress();
+        if (_lender == address(0)) {
+            revert NFTVault__InvalidAddress();
         }
-        
+        if (_borrower == address(0)) {
+            revert NFTVault__InvalidAddress();
+        }
+        if (s_tokenOwners[tokenId] != _borrower) {
+            revert NFTVault__TokenNotOwnedByUser();
+        }
 
         i_rwaNFT.safeTransferFrom(address(this), _lender, tokenId);
-        delete s_tokenOwners[tokenId];
         
-        // Remove tokenId from user's list
-        NFTInfo[] storage userTokens = s_userNFTs[_borrower];
-        for (uint256 i = 0; i < userTokens.length; i++) {
-            if (userTokens[i].tokenId == tokenId) {
-                userTokens[i] = userTokens[userTokens.length - 1];
-                userTokens.pop();
-                break;
-            }
-        }
-        s_tokenOwners[tokenId] = address(0); // Clear the owner mapping for the tokenId
+        // Clean up state
+        _removeTokenFromUser(_borrower, tokenId);
+        delete s_tokenOwners[tokenId];
+        delete s_tokenValue[tokenId];
         
         emit NFTWithdrawn(_lender, tokenId);
-    
     }
     function tokenTransferToAuctionHouseOnLiquidation(uint256 tokenId,address _auctionHouse) external nonReentrant whenNotPaused onlyOwner {
-        if (address(0) == _auctionHouse) {
-            revert NFTVault__NotZeroAddress();
+        if (_auctionHouse == address(0)) {
+            revert NFTVault__InvalidAddress();
         }
         if (s_tokenOwners[tokenId] == address(0)) {
             revert NFTVault__TokenDoesNotExist();
         }
-        bytes memory data = abi.encode(s_tokenValue[tokenId]); // Optional: you can pass additional data if needed
-        i_rwaNFT.safeTransferFrom(address(this), _auctionHouse, tokenId,data);
+        
+        address originalOwner = s_tokenOwners[tokenId]; // Store before deletion
+        bytes memory data = abi.encode(s_tokenValue[tokenId]);
+        
+        i_rwaNFT.safeTransferFrom(address(this), _auctionHouse, tokenId, data);
+        
+        // Clean up state
+        _removeTokenFromUser(originalOwner, tokenId);
         delete s_tokenOwners[tokenId];
+        delete s_tokenValue[tokenId];
         
-        // Remove tokenId from user's list
-        NFTInfo[] storage userTokens = s_userNFTs[s_tokenOwners[tokenId]];
-        for (uint256 i = 0; i < userTokens.length; i++) {
-            if (userTokens[i].tokenId == tokenId) {
-                userTokens[i] = userTokens[userTokens.length - 1];
-                userTokens.pop();
-                break;
-            }
-        }
-        s_tokenOwners[tokenId] = address(0); // Clear the owner mapping for the tokenId
-        
-        emit NFTTransferToAuctionHouse(s_tokenOwners[tokenId], tokenId);
+        emit NFTTransferToAuctionHouse(originalOwner, tokenId);
     }
     
      function onERC721Received(
@@ -167,6 +164,57 @@ import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
     ) external override pure returns (bytes4) {
        
         return IERC721Receiver.onERC721Received.selector;
+    }
+    
+    // ========================================
+    // INTERNAL FUNCTIONS
+    // ========================================
+    
+    function _removeTokenFromUser(address user, uint256 tokenId) internal {
+        NFTInfo[] storage userTokens = s_userNFTs[user];
+        for (uint256 i = 0; i < userTokens.length; i++) {
+            if (userTokens[i].tokenId == tokenId) {
+                userTokens[i] = userTokens[userTokens.length - 1];
+                userTokens.pop();
+                break;
+            }
+        }
+    }
+    
+    // ========================================
+    // VIEW FUNCTIONS
+    // ========================================
+    
+    function getTokenOwner(uint256 tokenId) external view returns (address) {
+        return s_tokenOwners[tokenId];
+    }
+    
+    function getTokenValue(uint256 tokenId) external view returns (uint256) {
+        return s_tokenValue[tokenId];
+    }
+    
+    function getUserNFTs(address user) external view returns (NFTInfo[] memory) {
+        return s_userNFTs[user];
+    }
+    
+    function getUserNFTCount(address user) external view returns (uint256) {
+        return s_userNFTs[user].length;
+    }
+    
+    function getRWANFTAddress() external view returns (address) {
+        return address(i_rwaNFT);
+    }
+    
+    // ========================================
+    // OWNER FUNCTIONS FOR EMERGENCY
+    // ========================================
+    
+    function pause() external onlyOwner {
+        _pause();
+    }
+    
+    function unpause() external onlyOwner {
+        _unpause();
     }
     
     
