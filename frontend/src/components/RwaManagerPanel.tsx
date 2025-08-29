@@ -30,7 +30,6 @@ export function RwaManagerPanel() {
   const [assetValue, setAssetValue] = useState('');
   const [assetOwner, setAssetOwner] = useState('');
   const [tokenUri, setTokenUri] = useState('');
-  const [ethToSend, setEthToSend] = useState('0');
 
   // Tradable
   const [tradTokenId, setTradTokenId] = useState('');
@@ -110,24 +109,28 @@ export function RwaManagerPanel() {
       {/* Mint: depositRWAAndMintNFT */}
       <div style={{ marginBottom: 12 }}>
         <h5>Deposit + Mint NFT & Coins</h5>
-  <small style={{ color: '#666' }}>Member status: {isMember ? 'Member' : 'Not a member'}. Only members can mint.</small>
+        <small style={{ color: '#666' }}>Direct contract call - no member role required</small>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
           <input placeholder="Request ID" value={requestId} onChange={e => setRequestId(e.target.value)} />
           <input placeholder="Asset Value (USD)" value={assetValue} onChange={e => setAssetValue(e.target.value)} />
           <input placeholder="Asset Owner" value={assetOwner} onChange={e => setAssetOwner(e.target.value)} />
           <input placeholder="Token URI (metadata)" value={tokenUri} onChange={e => setTokenUri(e.target.value)} />
-          {/* <input placeholder="ETH to send (optional)" value={ethToSend} onChange={e => setEthToSend(e.target.value)} /> */}
         </div>
         <div style={{ marginTop: 8 }}>
-          <button disabled={!address || isPending}
-            onClick={() => writeContract({
-              address: manager,
-              abi: rwaManagerAbi,
-              functionName: 'depositRWAAndMintNFT',
-              args: [BigInt(requestId || '0'), BigInt(assetValue || '0'), (assetOwner || address) as `0x${string}`, tokenUri],
-              value: ethToSend ? parseEther(ethToSend) : undefined,
-            })}>
-            {isPending ? 'Minting…' : 'Mint'}
+          <button
+            disabled={!address || isPending}
+            onClick={() => {
+              const owner = (assetOwner || address) as `0x${string}`;
+              const uri = tokenUri || `asset-${requestId || '0'}`;
+              writeContract({
+                address: manager,
+                abi: rwaManagerAbi,
+                functionName: 'depositRWAAndMintNFT',
+                args: [BigInt(requestId || '0'), BigInt(assetValue || '0'), owner, uri],
+              });
+            }}
+          >
+            {isPending ? 'Minting...' : 'Mint NFT & Coins'}
           </button>
         </div>
       </div>

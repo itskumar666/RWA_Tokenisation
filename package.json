@@ -21,6 +21,10 @@
   "dependencies": {
     "@chainlink/functions-toolkit": "^0.3.2",
     "dotenv": "^17.2.0",
-    "ethers": "^6.15.0"
+    "ethers": "^6.15.0",
+    "zustand": "^5.0.7"
+  },
+  "devDependencies": {
+    "ts-node": "^10.9.2"
   }
 }

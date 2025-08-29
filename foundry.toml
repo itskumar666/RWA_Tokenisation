@@ -6,9 +6,16 @@ remappings = [
     "@openzeppelin/=lib/openzeppelin-contracts/",
     '@chainlink/=lib/chainlink-brownie-contracts/'
 ]
+optimizer = true
+optimizer_runs = 200
+via_ir = true
 
 [rpc_endpoints]
 anvil = "http://127.0.0.1:8545"
+sepolia = "${SEPOLIA_RPC_URL}"
+
+[etherscan]
+sepolia = { key = "${ETHERSCAN_API_KEY}" }
 
 
 

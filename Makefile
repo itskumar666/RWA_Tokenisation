@@ -4,7 +4,7 @@ BROADCAST ?= --broadcast -vvvv
 
 # ---- COMMANDS ----
 
-.PHONY: all deploy_coin deploy_nft deploy_router deploy_verification deploy_manager deploy_all clean
+.PHONY: all deploy_coin deploy_nft deploy_router deploy_verification deploy_manager deploy_all deploy_monolith deploy_all_sepolia clean
 
 # Deploy RWA_Coins
 deploy_coin:
@@ -29,6 +29,24 @@ deploy_manager:
 # Deploy all in order
 deploy_all: deploy_coin deploy_nft deploy_router deploy_verification deploy_manager
 
+# Single script deployment of all contracts
+deploy_monolith:
+	forge script script/Deploy_All.s.sol:Deploy_All --rpc-url $(RPC_URL) $(BROADCAST)
+
+# Deploy all on Sepolia with verification
+deploy_all_sepolia:
+	forge script script/Deploy_All.s.sol:Deploy_All --rpc-url sepolia $(BROADCAST) --verify
+
 # Clean build artifacts
 clean:
 	forge clean
+
+.PHONY: frontend frontend-build frontend-preview
+frontend:
+	cd frontend && npm run dev
+
+frontend-build:
+	cd frontend && npm run build
+
+frontend-preview:
+	cd frontend && npm run preview

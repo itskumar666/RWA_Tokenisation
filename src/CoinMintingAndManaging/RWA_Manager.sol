@@ -40,6 +40,8 @@ import {IERC721Receiver} from "@openzeppelin/contracts/token/ERC721/IERC721Recei
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
+import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
 // import {RWA_Verification} from "./RWA_Verification.sol";
 import {RWA_VerifiedAssets} from "./RWA_VerifiedAssets.sol";
@@ -49,6 +51,7 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {RWA_Types} from "./RWA_Types.sol";
 contract RWA_Manager is Ownable, ReentrancyGuard, IERC721Receiver, AccessControl {
     using SafeERC20 for IERC20;
+    using ECDSA for bytes32;
     
 
     error RWA_Manager__AssetNotVerified();
@@ -90,6 +93,8 @@ contract RWA_Manager is Ownable, ReentrancyGuard, IERC721Receiver, AccessControl
         uint256 indexed tokenId,
         bytes data
     );
+    // Off-chain backend signer used to attest owner/requestId for user-driven mints
+    address public backendSigner;
 
     modifier onlyMember() {
         require(hasRole(MEMBER_ROLE, msg.sender), "Caller is not a member");
@@ -110,6 +115,12 @@ contract RWA_Manager is Ownable, ReentrancyGuard, IERC721Receiver, AccessControl
         _grantRole(MEMBER_ROLE, msg.sender);
 
 
+    }
+    function setBackendSigner(address _signer) external onlyOwner {
+        if (_signer == address(0)) {
+            revert RWA_Manager__ZeroAddress();
+        }
+        backendSigner = _signer;
     }
     function setNewMember(
         address _newMember
@@ -148,40 +159,61 @@ contract RWA_Manager is Ownable, ReentrancyGuard, IERC721Receiver, AccessControl
     // The depositRWAAndMintNFT function is used to deposit RWA and mint NFT.
     // It takes the address of the user, the request ID, and the token URI as parameters.
     // ******* before calling this function make sure that the asset is verified by RWA_VerifiedAssets contract *************
+
     function depositRWAAndMintNFT(
         uint256 _requestId,
         uint256 _assetValue,
         address _assetOwner,
-        string memory _tokenURI,
-        uint256 _valueInUSD
-    ) external payable onlyMember {
+        string memory _tokenURI
+       
+    ) external payable {
         // Input validation
+      
+        // Get asset details from verified assets contract - use separate variables to avoid stack too deep
+        // First try to find asset under the asset owner's address
+        (
+            RWA_Types.assetType assetType_,
+            string memory assetName_,
+            uint256 assetId_,
+            bool isLocked_,
+            bool isVerified_,
+            uint256 valueInUSD,
+            address owner_,
+            bool tradable_
+        ) = i_rwaVA.verifiedAssets(_assetOwner, _requestId);
+        
+        // If not found under owner, try backend signer (for server-registered assets)
+        if (!isVerified_ || assetId_ != _requestId) {
+            (
+                assetType_,
+                assetName_,
+                assetId_,
+                isLocked_,
+                isVerified_,
+                valueInUSD,
+                owner_,
+                tradable_
+            ) = i_rwaVA.verifiedAssets(backendSigner, _requestId);
+        }
+
         if (_assetOwner == address(0)) {
             revert RWA_Manager__ZeroAddress();
         }
-        if (_assetValue == 0 || _valueInUSD == 0) {
+        if (_assetValue == 0 || valueInUSD == 0) {
             revert RWA_Manager__ZeroAmount();
         }
-        if (msg.value != ethPriceFromChainlink) {
-            revert RWA_Manager__InsufficientETH();
-        }
 
-        // Get asset details from verified assets contract - use separate variables to avoid stack too deep
-        (, , uint256 assetId_, , bool isVerified_, , , ) = i_rwaVA.verifiedAssets(_assetOwner, _requestId);
-
-        // Verify asset is registered and verified
-        if (!isVerified_ || assetId_ != _requestId) {
+    // Verify asset is registered and verified, and owner matches provided _assetOwner
+    if (!isVerified_ || assetId_ != _requestId || owner_ != _assetOwner) {
             revert RWA_Manager__AssetNotVerified();
         }
 
-        // Get asset type and name separately
-        (RWA_Types.assetType assetType_, string memory assetName_, , , , , , ) = i_rwaVA.verifiedAssets(_assetOwner, _requestId);
 
         // Mint NFT
-        _mintNFT(_assetOwner, _tokenURI, assetType_, assetName_, _requestId, _valueInUSD);
+        _mintNFT(_assetOwner, _tokenURI, assetType_, assetName_, _requestId, valueInUSD);
         
         // Mint coins
-        _mintCoins(_assetOwner, _valueInUSD);
+        _mintCoins(_assetOwner, valueInUSD);
 
         // Store asset information - create struct directly
         RWA_Types.RWA_Info memory newAsset = RWA_Types.RWA_Info({
@@ -190,7 +222,7 @@ contract RWA_Manager is Ownable, ReentrancyGuard, IERC721Receiver, AccessControl
             assetId: _requestId,
             isLocked: false,
             isVerified: true,
-            valueInUSD: _valueInUSD,
+            valueInUSD: valueInUSD,
             owner: _assetOwner,
             tradable: false // Initially not tradable until coins are burned
         });
@@ -198,7 +230,72 @@ contract RWA_Manager is Ownable, ReentrancyGuard, IERC721Receiver, AccessControl
         s_userRWAInfoagainstRequestId[_requestId] = newAsset;
         s_userAssets[_assetOwner][_requestId] = newAsset;
 
-        emit AssetDeposited(_assetOwner, _requestId, _assetValue, _valueInUSD);
+        emit AssetDeposited(_assetOwner, _requestId, _assetValue, valueInUSD);
+    }
+
+    // Helper to build message hash the backend signs: keccak256(abi.encode(owner, requestId))
+    function _mintProofHash(address _owner, uint256 _requestId) internal pure returns (bytes32) {
+        return keccak256(abi.encode(_owner, _requestId));
+    }
+
+    // User-facing mint with backend proof; no MEMBER role required.
+    function depositRWAAndMintNFTWithProof(
+        uint256 _requestId,
+        uint256 _assetValue,
+        address _assetOwner,
+        string memory _tokenURI,
+        bytes calldata signature
+    ) external payable nonReentrant {
+        // Caller must be the asset owner
+        if (msg.sender != _assetOwner) {
+            revert RWA_Manager__NotOwnerOfAsset();
+        }
+        // Verify backend-signed proof ties owner + requestId
+        bytes32 digest = MessageHashUtils.toEthSignedMessageHash(_mintProofHash(_assetOwner, _requestId));
+        address signer = ECDSA.recover(digest, signature);
+        require(signer == backendSigner && signer != address(0), "invalid backend proof");
+
+        // Fetch asset details from verified assets and validate
+        (
+            RWA_Types.assetType assetType_,
+            string memory assetName_,
+            uint256 assetId_,
+            bool isLocked_,
+            bool isVerified_,
+            uint256 valueInUSD,
+            address owner_,
+            bool tradable_
+        ) = i_rwaVA.verifiedAssets(backendSigner, _requestId);
+
+        if (_assetOwner == address(0)) {
+            revert RWA_Manager__ZeroAddress();
+        }
+        if (_assetValue == 0 || valueInUSD == 0) {
+            revert RWA_Manager__ZeroAmount();
+        }
+    if (!isVerified_ || assetId_ != _requestId || owner_ != _assetOwner) {
+            revert RWA_Manager__AssetNotVerified();
+        }
+
+        // Mint NFT
+        _mintNFT(_assetOwner, _tokenURI, assetType_, assetName_, _requestId, valueInUSD);
+        // Mint coins
+        _mintCoins(_assetOwner, valueInUSD);
+
+        // Store asset info
+        RWA_Types.RWA_Info memory newAsset = RWA_Types.RWA_Info({
+            assetType: assetType_,
+            assetName: assetName_,
+            assetId: _requestId,
+            isLocked: false,
+            isVerified: true,
+            valueInUSD: valueInUSD,
+            owner: _assetOwner,
+            tradable: false
+        });
+        s_userRWAInfoagainstRequestId[_requestId] = newAsset;
+        s_userAssets[_assetOwner][_requestId] = newAsset;
+        emit AssetDeposited(_assetOwner, _requestId, _assetValue, valueInUSD);
     }
 
     // submit all coins minted against this token to make token tradable on lending platform

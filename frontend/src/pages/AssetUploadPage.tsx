@@ -5,7 +5,7 @@ import { BACKEND_URL } from '../config';
 export default function AssetUploadPage() {
   const { address } = useAccount();
   const [files, setFiles] = useState<FileList | null>(null);
-  const [assetType, setAssetType] = useState('0');
+  const [assetType, setAssetType] = useState('');
   const [assetName, setAssetName] = useState('');
   const [valueUSD, setValueUSD] = useState('');
   const [ownerEcho, setOwnerEcho] = useState('');
@@ -94,7 +94,8 @@ export default function AssetUploadPage() {
 
   return (
     <div>
-  <h4>Asset Management</h4>
+        <h3>This page is supposed to be used by members only and admin but for testing purpose i have unlocked it for now It deduct eth from my wallet so use it once or twice for testing Thank you</h3>
+  <h4>Register asset</h4>
       <div className="input-row">
         <input type="file" multiple onChange={e => setFiles(e.target.files)} />
       </div>
@@ -105,6 +106,7 @@ export default function AssetUploadPage() {
         <input placeholder="Asset Name" value={assetName} onChange={e => setAssetName(e.target.value)} />
         <input placeholder="Value (USD)" value={valueUSD} onChange={e => setValueUSD(e.target.value)} />
         <input placeholder="Owner Echo (optional)" value={ownerEcho} onChange={e => setOwnerEcho(e.target.value)} />
+        <h6>Asset type- 0:House, 1:Car, 2:Art, 3:Collectible</h6>
       </div>
       <div className="mt-2" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -113,7 +115,7 @@ export default function AssetUploadPage() {
         </label>
       </div>
       <div className="mt-2">
-  <button disabled={!files || files.length === 0 || submittingRegister} onClick={registerViaBackend}>{submittingRegister ? 'Submitting…' : 'Upload & Register (Server)'}</button>
+  <button disabled={!files || files.length === 0 || submittingRegister} onClick={registerViaBackend}>{submittingRegister ? 'Submitting…' : 'Register'}</button>
       </div>
       {assetId !== null && <p>Asset ID: {assetId}</p>}
 
